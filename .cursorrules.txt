@@ -1,0 +1,6 @@
+Always use IBM Plex Mono as the only font.
+Background is always #000000. Never add gradients, shadows, or blur.
+Three.js canvas is always position:fixed, z-index:0, pointerEvents:none.
+All HTML UI sits at z-index:10+ with transparent backgrounds.
+Build parts in strict order — confirm completion before proceeding.
+Never combine parts from the implementation brief.
