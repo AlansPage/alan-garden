@@ -181,7 +181,7 @@ export default function NotePageClient({
           span.classList.add("char-consumed");
         }, 300);
       }
-    }, 800);
+    }, 1000);
 
     return () => {
       window.dispatchEvent(new CustomEvent("creature-stop-feeding"));

@@ -12,8 +12,10 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshBasicMaterial,
+  Points,
   PerspectiveCamera,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
   Vector2,
   Vector3,
@@ -48,13 +50,13 @@ interface EdgeVisual {
 
 export default function GraphCanvas({
   graph,
-  selectedSlug,
   onSelectNode,
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !inputRef.current) return;
 
     const scene = new Scene();
     const renderer = new WebGLRenderer({
@@ -199,6 +201,136 @@ export default function GraphCanvas({
     const raycaster = new Raycaster();
     const mouse = new Vector2();
     let hoveredIndex: number | null = null;
+    const hoveredWorld = new Vector3();
+    let wakeTarget = 0;
+    let wakeCurrent = 0;
+
+    const makeParticleMaterial = () =>
+      new ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+        uniforms: {
+          uPixelRatio: { value: window.devicePixelRatio || 1 },
+          uGlobalAlpha: { value: 1 },
+        },
+        vertexShader: `
+          attribute vec3 color;
+          attribute float aSize;
+          attribute float aAlpha;
+          uniform float uPixelRatio;
+          uniform float uGlobalAlpha;
+          varying vec3 vColor;
+          varying float vAlpha;
+
+          void main() {
+            vColor = color;
+            vAlpha = aAlpha * uGlobalAlpha;
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            gl_PointSize = aSize * uPixelRatio;
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vColor;
+          varying float vAlpha;
+          void main() {
+            vec2 c = gl_PointCoord - vec2(0.5);
+            float d = length(c);
+            float mask = 1.0 - smoothstep(0.45, 0.5, d);
+            gl_FragColor = vec4(vColor, vAlpha * mask);
+          }
+        `,
+      });
+
+    // Dormant creature: two organs at screen edges (dim)
+    const creatureOrgans = [
+      {
+        center: new Vector3(-520, 0, 0),
+        baseRadius: 120,
+        phase: Math.random() * Math.PI * 2,
+      },
+      {
+        center: new Vector3(520, 0, 0),
+        baseRadius: 120,
+        phase: Math.random() * Math.PI * 2,
+      },
+    ];
+
+    const creatureParticles = 6000;
+    const creatureGeometry = new BufferGeometry();
+    const creaturePositions = new Float32Array(creatureParticles * 3);
+    const creatureOffsets = new Float32Array(creatureParticles * 3);
+    const creatureColors = new Float32Array(creatureParticles * 3);
+    const creatureSizes = new Float32Array(creatureParticles);
+    const creatureAlpha = new Float32Array(creatureParticles);
+    const creatureOrganIndex = new Uint8Array(creatureParticles);
+
+    for (let i = 0; i < creatureParticles; i++) {
+      const o = i < creatureParticles / 2 ? 0 : 1;
+      creatureOrganIndex[i] = o;
+      const organ = creatureOrgans[o];
+      const theta = Math.random() * Math.PI * 2;
+      const r = organ.baseRadius * (0.25 + Math.random() * 0.75);
+      const ex = Math.cos(theta) * r;
+      const ey = Math.sin(theta) * (r * (0.6 + Math.random() * 0.4));
+      const idx3 = i * 3;
+      creatureOffsets[idx3] = ex;
+      creatureOffsets[idx3 + 1] = ey;
+      creatureOffsets[idx3 + 2] = 0;
+      creaturePositions[idx3] = organ.center.x + ex;
+      creaturePositions[idx3 + 1] = organ.center.y + ey;
+      creaturePositions[idx3 + 2] = 0;
+
+      const edgeFactor = Math.min(1, Math.sqrt((ex * ex + ey * ey) / (organ.baseRadius * organ.baseRadius)));
+      const mixed = new Color(0x00ffd1).lerp(new Color(0xffffff), edgeFactor);
+      creatureColors[idx3] = mixed.r;
+      creatureColors[idx3 + 1] = mixed.g;
+      creatureColors[idx3 + 2] = mixed.b;
+
+      creatureAlpha[i] = 1;
+      creatureSizes[i] = 1.0 + Math.random() * 0.8;
+    }
+
+    creatureGeometry.setAttribute(
+      "position",
+      new BufferAttribute(creaturePositions, 3)
+    );
+    creatureGeometry.setAttribute("color", new BufferAttribute(creatureColors, 3));
+    creatureGeometry.setAttribute("aSize", new BufferAttribute(creatureSizes, 1));
+    creatureGeometry.setAttribute("aAlpha", new BufferAttribute(creatureAlpha, 1));
+
+    const creatureMaterial = makeParticleMaterial();
+    creatureMaterial.uniforms.uGlobalAlpha.value = 0.2;
+    const creaturePoints = new Points(creatureGeometry, creatureMaterial);
+    scene.add(creaturePoints);
+
+    const podPerSide = 200;
+    const podParticles = podPerSide * 2;
+    const podGeometry = new BufferGeometry();
+    const podPositions = new Float32Array(podParticles * 3);
+    const podColors = new Float32Array(podParticles * 3);
+    const podSizes = new Float32Array(podParticles);
+    const podAlpha = new Float32Array(podParticles);
+    for (let i = 0; i < podParticles; i++) {
+      const idx3 = i * 3;
+      podPositions[idx3] = -10000;
+      podPositions[idx3 + 1] = -10000;
+      podPositions[idx3 + 2] = 0;
+      podColors[idx3] = 1;
+      podColors[idx3 + 1] = 1;
+      podColors[idx3 + 2] = 1;
+      podAlpha[i] = 0.6;
+      podSizes[i] = 1.0 + Math.random() * 0.6;
+    }
+    podGeometry.setAttribute("position", new BufferAttribute(podPositions, 3));
+    podGeometry.setAttribute("color", new BufferAttribute(podColors, 3));
+    podGeometry.setAttribute("aSize", new BufferAttribute(podSizes, 1));
+    podGeometry.setAttribute("aAlpha", new BufferAttribute(podAlpha, 1));
+    const podMaterial = makeParticleMaterial();
+    podMaterial.uniforms.uGlobalAlpha.value = 0;
+    const podPoints = new Points(podGeometry, podMaterial);
+    scene.add(podPoints);
 
     const onPointerMove = (event: PointerEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -206,7 +338,7 @@ export default function GraphCanvas({
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     };
 
-    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    inputRef.current.addEventListener("pointermove", onPointerMove);
 
     let frame = 0;
     let animationId: number;
@@ -306,6 +438,10 @@ export default function GraphCanvas({
       if (newHovered === hoveredIndex) return;
 
       hoveredIndex = newHovered;
+      wakeTarget = hoveredIndex === null ? 0 : 1;
+      if (hoveredIndex !== null) {
+        nodes[hoveredIndex].mesh.getWorldPosition(hoveredWorld);
+      }
 
       nodes.forEach((n, index) => {
         const mat = n.mesh.material as MeshBasicMaterial;
@@ -368,10 +504,11 @@ export default function GraphCanvas({
       onSelectNode(null);
     };
 
-    renderer.domElement.addEventListener("click", onClick);
+    inputRef.current.addEventListener("click", onClick);
 
     const animate = () => {
       frame += 1;
+      const t = frame / 60;
 
       simulate();
       updateEdges();
@@ -379,6 +516,75 @@ export default function GraphCanvas({
       rootGroup.rotation.y += 0.0003;
 
       highlightHover();
+
+      // Dormant/waking creature update
+      wakeCurrent += (wakeTarget - wakeCurrent) * 0.08; // ~0.8s to converge
+      creatureMaterial.uniforms.uGlobalAlpha.value = 0.2 + 0.8 * wakeCurrent;
+      podMaterial.uniforms.uGlobalAlpha.value = wakeCurrent;
+
+      for (let i = 0; i < creatureParticles; i++) {
+        const organ = creatureOrgans[creatureOrganIndex[i]];
+        const idx3 = i * 3;
+        const ex = creatureOffsets[idx3];
+        const ey = creatureOffsets[idx3 + 1];
+        const pulse = 1 + 0.06 * Math.sin(t * 0.6 + organ.phase);
+        creaturePositions[idx3] = organ.center.x + ex * pulse;
+        creaturePositions[idx3 + 1] = organ.center.y + ey * pulse;
+        creaturePositions[idx3 + 2] = 0;
+      }
+      (creatureGeometry.getAttribute("position") as BufferAttribute).needsUpdate =
+        true;
+
+      if (hoveredIndex !== null) {
+        const target = hoveredWorld;
+        for (let side = 0; side < 2; side++) {
+          const start = creatureOrgans[side].center;
+          const baseIndex = side * podPerSide;
+          const dir = new Vector3().subVectors(target, start);
+          const len = Math.max(1, dir.length());
+          dir.multiplyScalar(1 / len);
+          const perp1 = new Vector3().crossVectors(dir, new Vector3(0, 1, 0)).normalize();
+          const perp2 = new Vector3().crossVectors(dir, perp1).normalize();
+
+          for (let i = 0; i < podPerSide; i++) {
+            const idx = baseIndex + i;
+            const idx3 = idx * 3;
+            const baseT = i / (podPerSide - 1);
+            const extendT = baseT * wakeCurrent;
+            const px = start.x + (target.x - start.x) * extendT;
+            const py = start.y + (target.y - start.y) * extendT;
+            const pz = start.z + (target.z - start.z) * extendT;
+
+            let ox = 0;
+            let oy = 0;
+            let oz = 0;
+            if (baseT > 0.85) {
+              const tip = (baseT - 0.85) / 0.15;
+              const angle = t * 0.6 + i * 0.1 + side;
+              const r = 10 * tip;
+              const orbit = perp1
+                .clone()
+                .multiplyScalar(Math.cos(angle) * r)
+                .add(perp2.clone().multiplyScalar(Math.sin(angle) * r));
+              ox = orbit.x;
+              oy = orbit.y;
+              oz = orbit.z;
+            }
+
+            podPositions[idx3] = px + ox;
+            podPositions[idx3 + 1] = py + oy;
+            podPositions[idx3 + 2] = pz + oz;
+          }
+        }
+      } else {
+        for (let i = 0; i < podParticles; i++) {
+          const idx3 = i * 3;
+          podPositions[idx3] = -10000;
+          podPositions[idx3 + 1] = -10000;
+          podPositions[idx3 + 2] = 0;
+        }
+      }
+      (podGeometry.getAttribute("position") as BufferAttribute).needsUpdate = true;
 
       renderer.render(scene, camera);
       animationId = window.requestAnimationFrame(animate);
@@ -389,15 +595,26 @@ export default function GraphCanvas({
     return () => {
       window.cancelAnimationFrame(animationId);
       window.removeEventListener("resize", resize);
-      renderer.domElement.removeEventListener("pointermove", onPointerMove);
-      renderer.domElement.removeEventListener("click", onClick);
+      inputRef.current?.removeEventListener("pointermove", onPointerMove);
+      inputRef.current?.removeEventListener("click", onClick);
+      scene.remove(creaturePoints);
+      scene.remove(podPoints);
+      creatureGeometry.dispose();
+      podGeometry.dispose();
+      creatureMaterial.dispose();
+      podMaterial.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
     };
-  }, [graph, onSelectNode, selectedSlug]);
+  }, [graph, onSelectNode]);
 
-  return <div ref={containerRef} />;
+  return (
+    <>
+      <div ref={containerRef} />
+      <div ref={inputRef} className="graph-input-layer" />
+    </>
+  );
 }
 
