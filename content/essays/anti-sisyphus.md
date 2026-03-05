@@ -1,5 +1,5 @@
 ---
-title: Anti-Sisyphus: On the Wandering Spirit
+title: "Anti-Sisyphus: On the Wandering Spirit"
 date: 2024-01-15
 lastTended: 2025-02-28
 status: budding

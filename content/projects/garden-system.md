@@ -1,5 +1,5 @@
 ---
-title: Alan's Garden System
+title: "Alan's Garden System"
 date: 2024-11-01
 lastTended: 2025-03-01
 status: evergreen

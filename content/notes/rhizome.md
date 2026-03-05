@@ -1,5 +1,5 @@
 ---
-title: Rhizome
+title: "Rhizome"
 date: 2024-07-12
 lastTended: 2025-02-10
 status: seedling

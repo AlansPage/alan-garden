@@ -1,5 +1,5 @@
 ---
-title: Apparatus of Capture
+title: "Apparatus of Capture"
 date: 2024-05-10
 lastTended: 2025-02-15
 status: budding

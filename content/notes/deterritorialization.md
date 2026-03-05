@@ -1,5 +1,5 @@
 ---
-title: Deterritorialization
+title: "Deterritorialization"
 date: 2024-08-05
 lastTended: 2025-01-28
 status: seedling

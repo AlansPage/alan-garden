@@ -1,5 +1,5 @@
 ---
-title: Nomadic Consciousness
+title: "Nomadic Consciousness"
 date: 2024-03-22
 lastTended: 2025-03-01
 status: evergreen

@@ -1,5 +1,5 @@
 ---
-title: Desire Machines
+title: "Desire Machines"
 date: 2024-06-01
 lastTended: 2025-01-20
 status: seedling

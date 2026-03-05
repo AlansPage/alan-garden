@@ -1,5 +1,5 @@
 ---
-title: Body Without Organs
+title: "Body Without Organs"
 date: 2024-10-22
 lastTended: 2025-03-02
 status: seedling

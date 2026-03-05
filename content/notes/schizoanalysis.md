@@ -1,5 +1,5 @@
 ---
-title: Schizoanalysis
+title: "Schizoanalysis"
 date: 2024-09-18
 lastTended: 2025-02-05
 status: seedling

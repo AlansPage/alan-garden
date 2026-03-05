@@ -54,8 +54,9 @@ export interface VaultStats {
 function getAllContentFiles(): { filePath: string; type: ContentType }[] {
   const files: { filePath: string; type: ContentType }[] = [];
 
-  const types: ContentType[] = ["notes", "essays", "projects"];
-  const typeMap: Record<string, ContentType> = {
+  const types = ["notes", "essays", "projects"] as const;
+  type DirKey = (typeof types)[number];
+  const typeMap: Record<DirKey, ContentType> = {
     notes: "note",
     essays: "essay",
     projects: "project",
@@ -101,12 +102,24 @@ function parseNote(
   const { data, content } = matter(raw);
   const slug = slugFromPath(filePath);
 
+  const normalizeDate = (value: unknown): string => {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (value instanceof Date) {
+      return value.toISOString().slice(0, 10);
+    }
+    return String(value);
+  };
+
+  const date = normalizeDate(data.date);
+  const tended = normalizeDate(data.lastTended || data.date);
+
   return {
     slug,
     frontmatter: {
       title: data.title ?? "Untitled",
-      date: data.date ?? "",
-      lastTended: data.lastTended ?? data.date ?? "",
+      date,
+      lastTended: tended || date,
       status: data.status ?? "seedling",
       tags: Array.isArray(data.tags) ? data.tags : [],
       excerpt: data.excerpt ?? content.slice(0, 200).replace(/\n/g, " "),
