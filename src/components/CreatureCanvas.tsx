@@ -83,6 +83,10 @@ export interface CreatureCanvasHandle {
 const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
   function CreatureCanvas(_props, ref) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const sceneRef = useRef<Scene | null>(null);
+    const cameraRef = useRef<OrthographicCamera | null>(null);
+    const rendererRef = useRef<WebGLRenderer | null>(null);
+    const animFrameRef = useRef<number>(0);
 
     useImperativeHandle(ref, () => ({
       triggerFeed: (_x: number, _y: number) => {
@@ -97,15 +101,20 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
       let width = window.innerWidth;
       let height = window.innerHeight;
 
+      // ── Core Three.js setup (stored in refs for external access) ─────────────
+
       const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
       renderer.setPixelRatio(window.devicePixelRatio || 1);
       renderer.setSize(width, height);
+      rendererRef.current = renderer;
 
       const scene = new Scene();
+      sceneRef.current = scene;
 
       // OrthographicCamera: top=0, bottom=height so pixel y matches screen y
       const camera = new OrthographicCamera(0, width, 0, height, -1000, 1000);
       camera.position.z = 1;
+      cameraRef.current = camera;
 
       // Organ centers in world/pixel space — recomputed on resize
       const organCenters: [number, number][] = ORGAN_NORM.map(([nx, ny]) => [
@@ -113,11 +122,10 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
         ny * height,
       ]);
 
-      // ── Organs ──────────────────────────────────────────────────────────────
+      // ── Organs ───────────────────────────────────────────────────────────────
 
       const organGeos: BufferGeometry[] = [];
       const organMats: ShaderMaterial[] = [];
-      // baseOffsets[o] = [ox0, oy0, 0, ox1, oy1, 0, ...] relative to center
       const organBaseOffsets: Float32Array[] = [];
 
       const organPulseSpeed = Array.from(
@@ -137,15 +145,13 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
 
         for (let i = 0; i < PARTICLES_PER_ORGAN; i++) {
           const ox = gauss(SIGMA);
-          const oy = gauss(SIGMA * 0.75); // slight vertical squash
+          const oy = gauss(SIGMA * 0.75);
           offsets[i * 3] = ox;
           offsets[i * 3 + 1] = oy;
           offsets[i * 3 + 2] = 0;
-
           positions[i * 3] = cx + ox;
           positions[i * 3 + 1] = cy + oy;
           positions[i * 3 + 2] = 0;
-
           lifeArr[i] = Math.min(1.0, Math.sqrt(ox * ox + oy * oy) / (3 * SIGMA));
         }
 
@@ -167,11 +173,10 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
         organBaseOffsets.push(offsets);
       }
 
-      // ── Streams ─────────────────────────────────────────────────────────────
+      // ── Streams ──────────────────────────────────────────────────────────────
 
       const streamGeos: BufferGeometry[] = [];
       const streamMats: ShaderMaterial[] = [];
-      // Per-stream flow accumulator
       const streamTimes = new Float32Array(STREAM_COUNT);
 
       for (let s = 0; s < STREAM_COUNT; s++) {
@@ -200,13 +205,10 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
           const dx = bx - ax;
           const dy = by - ay;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
-          // Perpendicular unit vector
           const px = -dy / len;
           const py = dx / len;
 
-          const posAttr = streamGeos[s].getAttribute(
-            "position"
-          ) as BufferAttribute;
+          const posAttr = streamGeos[s].getAttribute("position") as BufferAttribute;
           const arr = posAttr.array as Float32Array;
 
           for (let i = 0; i < PARTICLES_PER_STREAM; i++) {
@@ -222,24 +224,19 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
 
       updateStreams();
 
-      // ── Animation loop ───────────────────────────────────────────────────────
+      // ── Animation loop ────────────────────────────────────────────────────────
 
       let time = 0;
-      let rafId = 0;
 
       function animate() {
         time += 0.016;
 
-        // Organ pulse
         for (let o = 0; o < ORGAN_COUNT; o++) {
           const [cx, cy] = organCenters[o];
           const pulse =
-            Math.sin(time * organPulseSpeed[o] + organPulsePhase[o]) * 0.06 +
-            1.0;
+            Math.sin(time * organPulseSpeed[o] + organPulsePhase[o]) * 0.06 + 1.0;
           const offsets = organBaseOffsets[o];
-          const posAttr = organGeos[o].getAttribute(
-            "position"
-          ) as BufferAttribute;
+          const posAttr = organGeos[o].getAttribute("position") as BufferAttribute;
           const arr = posAttr.array as Float32Array;
 
           for (let i = 0; i < PARTICLES_PER_ORGAN; i++) {
@@ -250,19 +247,18 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
           posAttr.needsUpdate = true;
         }
 
-        // Stream flow
         for (let s = 0; s < STREAM_COUNT; s++) {
           streamTimes[s] = (streamTimes[s] + 0.003) % 1;
         }
         updateStreams();
 
         renderer.render(scene, camera);
-        rafId = window.requestAnimationFrame(animate);
+        animFrameRef.current = window.requestAnimationFrame(animate);
       }
 
-      rafId = window.requestAnimationFrame(animate);
+      animFrameRef.current = window.requestAnimationFrame(animate);
 
-      // ── Resize ───────────────────────────────────────────────────────────────
+      // ── Resize ────────────────────────────────────────────────────────────────
 
       function onResize() {
         width = window.innerWidth;
@@ -279,8 +275,10 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
 
       window.addEventListener("resize", onResize);
 
+      // ── Cleanup ───────────────────────────────────────────────────────────────
+
       return () => {
-        window.cancelAnimationFrame(rafId);
+        window.cancelAnimationFrame(animFrameRef.current);
         window.removeEventListener("resize", onResize);
         for (let o = 0; o < ORGAN_COUNT; o++) {
           organGeos[o].dispose();
@@ -291,6 +289,9 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
           streamMats[s].dispose();
         }
         renderer.dispose();
+        sceneRef.current = null;
+        cameraRef.current = null;
+        rendererRef.current = null;
       };
     }, []);
 
