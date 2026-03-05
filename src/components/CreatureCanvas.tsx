@@ -76,11 +76,13 @@ const STREAM_FRAG = /* glsl */ `
   }
 `;
 
-export interface CreatureCanvasHandle {
-  triggerFeed: (x: number, y: number) => void;
+export interface CreatureRef {
+  triggerFeed: (x: number, y: number, noteData: { wordCount: number; tags: string[] }) => void;
+  triggerSeek: (query: string) => void;
+  setDimmed: (dimmed: boolean) => void;
 }
 
-const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
+const CreatureCanvas = forwardRef<CreatureRef>(
   function CreatureCanvas(_props, ref) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const sceneRef = useRef<Scene | null>(null);
@@ -89,7 +91,13 @@ const CreatureCanvas = forwardRef<CreatureCanvasHandle>(
     const animFrameRef = useRef<number>(0);
 
     useImperativeHandle(ref, () => ({
-      triggerFeed: (_x: number, _y: number) => {
+      triggerFeed: (_x: number, _y: number, _noteData: { wordCount: number; tags: string[] }) => {
+        // no-op — will implement later
+      },
+      triggerSeek: (_query: string) => {
+        // no-op — will implement later
+      },
+      setDimmed: (_dimmed: boolean) => {
         // no-op — will implement later
       },
     }));
