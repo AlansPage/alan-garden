@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import SceneRoot from "../components/SceneRoot";
 
 const plexMono = IBM_Plex_Mono({
   variable: "--font-plex-mono",
@@ -22,7 +21,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${plexMono.variable} garden-body`}>
-        <SceneRoot />
         {children}
       </body>
     </html>
