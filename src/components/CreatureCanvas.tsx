@@ -33,9 +33,9 @@ function lerp(a: number, b: number, t: number): number {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ORGAN_COUNT = 5;
-const PARTICLES_PER_ORGAN = 800;
+const PARTICLES_PER_ORGAN = 400;
 const STREAM_COUNT = 5;
-const PARTICLES_PER_STREAM = 60;
+const PARTICLES_PER_STREAM = 40;
 const PSEUDOPOD_COUNT = 1800;
 const FEED_PARTICLE_MAX = 1000;
 
@@ -95,8 +95,7 @@ const ORGAN_FRAG = /* glsl */ `
   varying vec3 vColor;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) discard;
-    float alpha = 1.0 - (d * 2.0);
+    float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
     gl_FragColor = vec4(vColor, alpha * 0.35);
   }
@@ -108,8 +107,7 @@ const CORE_FRAG = /* glsl */ `
   varying vec3 vColor;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) discard;
-    float alpha = 1.0 - (d * 2.0);
+    float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
     gl_FragColor = vec4(vColor * brightness, alpha * 0.35);
   }
@@ -121,8 +119,7 @@ const PSEUDOPOD_FRAG = /* glsl */ `
   varying vec3 vColor;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) discard;
-    float alpha = 1.0 - (d * 2.0);
+    float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
     gl_FragColor = vec4(vColor, alpha * uAlpha);
   }
@@ -141,8 +138,7 @@ const STREAM_VERT = /* glsl */ `
 const STREAM_FRAG = /* glsl */ `
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) discard;
-    float alpha = 1.0 - (d * 2.0);
+    float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
     gl_FragColor = vec4(1.0, 1.0, 1.0, alpha * 0.22);
   }
@@ -311,7 +307,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     // ── Three.js core ─────────────────────────────────────────────────────────
 
     const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0); // alpha 0 = transparent, CSS black shows through
 
@@ -561,8 +557,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     // ── Animation loop ─────────────────────────────────────────────────────────
 
     let time = 0;
+    let frameCount = 0;
 
     function animate() {
+      frameCount++;
+      if (frameCount % 2 !== 0) {
+        animFrameRef.current = window.requestAnimationFrame(animate);
+        return;
+      }
       time += 0.016;
 
       // ── Seek state ──────────────────────────────────────────────────────────
@@ -716,6 +718,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         const pulse =
           Math.sin(time * speed + organPulsePhase[o]) * 0.055 + 1.0;
         const scale = pulse * organSizeMul[o];
+
+        // Skip position update if organ is essentially static
+        if (Math.abs(scale - 1.0) < 0.001) continue;
+
         const offsets = organBaseOffsets[o];
         const posAttr = organGeos[o].getAttribute(
           "position"
