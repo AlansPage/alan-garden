@@ -6,7 +6,6 @@ import {
   BufferAttribute,
   BufferGeometry,
   CanvasTexture,
-  Color,
   Group,
   OrthographicCamera,
   Points,
@@ -88,12 +87,14 @@ const INNER_COUNT = 10000;
 const TENDRIL_COUNT = 8;
 const PARTICLES_PER_TENDRIL = 200;
 const OUTER_RADIUS = 260;
-const CORE_RADIUS = 45;
+const STREAM_COUNT = 600;
 
 // ── Shaders ───────────────────────────────────────────────────────────────────
 
+// Sphere layers — breathe + global dim + core brightness
 const SPHERE_VERT = /* glsl */ `
   uniform float breathe;
+  uniform float uGlobalAlpha;
   attribute float size;
   attribute vec3 aColor;
   attribute float aAlpha;
@@ -101,7 +102,7 @@ const SPHERE_VERT = /* glsl */ `
   varying float vAlpha;
   void main() {
     vColor = aColor;
-    vAlpha = aAlpha;
+    vAlpha = aAlpha * uGlobalAlpha;
     vec3 pos = position * breathe;
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
     gl_PointSize = size;
@@ -110,12 +111,40 @@ const SPHERE_VERT = /* glsl */ `
 `;
 
 const SPHERE_FRAG = /* glsl */ `
+  uniform float uCoreBrightness;
   varying vec3 vColor;
   varying float vAlpha;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
     float alpha = max(0.0, 1.0 - d * 2.2);
     alpha = pow(alpha, 1.4);
+    gl_FragColor = vec4(vColor * uCoreBrightness, alpha * vAlpha);
+  }
+`;
+
+// Stream particles — age-based color, no sphere breathe
+const STREAM_VERT = /* glsl */ `
+  attribute float size;
+  attribute vec3 aStreamColor;
+  attribute float aStreamAlpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    vColor = aStreamColor;
+    vAlpha = aStreamAlpha;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = size;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const STREAM_FRAG = /* glsl */ `
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    float d = length(gl_PointCoord - vec2(0.5));
+    float alpha = max(0.0, 1.0 - d * 2.5);
+    alpha = pow(alpha, 1.2);
     gl_FragColor = vec4(vColor, alpha * vAlpha);
   }
 `;
@@ -127,8 +156,16 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(v >> 16) / 255, ((v >> 8) & 0xff) / 255, (v & 0xff) / 255];
 }
 
-function lerpColor(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+function lerpColor(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): [number, number, number] {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
 }
 
 // ── Public interface ──────────────────────────────────────────────────────────
@@ -152,16 +189,15 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  // Stubs — keep the interface working
+  // Bridge: dispatch window events so the Three.js loop (inside useEffect)
+  // can react without cross-closure coupling.
   useImperativeHandle(ref, () => ({
     triggerFeed(_x, _y, _noteData) {
-      // Feed animation not yet reimplemented for sphere
+      window.dispatchEvent(new CustomEvent("creature-start-feeding"));
     },
-    triggerSeek(_query) {
-      // Seek animation not yet reimplemented for sphere
-    },
-    setDimmed(_dimmed) {
-      // Dim animation not yet reimplemented for sphere
+    triggerSeek(_query) {},
+    setDimmed(dimmed) {
+      window.dispatchEvent(new CustomEvent("creature-dim", { detail: dimmed }));
     },
   }));
 
@@ -183,9 +219,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     // ── Camera — orthographic, centered at origin ─────────────────────────────
     // Sphere radius = 260. We want it to fill ~55% of viewport height.
-    // So visible half-height = 260 / 0.55 ≈ 473
+    // visibleHalfH is constant — only aspect changes on resize.
     const visibleHalfH = OUTER_RADIUS / 0.55;
-    const aspect = width / height;
+    let aspect = width / height;
     const camera = new OrthographicCamera(
       -visibleHalfH * aspect,
       visibleHalfH * aspect,
@@ -196,15 +232,22 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     );
     camera.position.z = 500;
 
+    // ── Screen → world coordinate conversion ─────────────────────────────────
+    // Used to convert char screen positions to Three.js world units.
+    const screenToWorld = (sx: number, sy: number): [number, number] => [
+      (sx / width - 0.5) * visibleHalfH * aspect * 2,
+      -(sy / height - 0.5) * visibleHalfH * 2,
+    ];
+
     // ── Bloom ─────────────────────────────────────────────────────────────────
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.5,   // strength
-      0.25,  // radius
-      0.55   // threshold
+      0.5,
+      0.25,
+      0.55
     );
     composer.addPass(bloomPass);
 
@@ -225,14 +268,12 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const colDeepBlue = hexToRgb("#2a5fd4");
 
     for (let i = 0; i < OUTER_COUNT; i++) {
-      // Random point on unit sphere
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       const nx = Math.sin(phi) * Math.cos(theta);
       const ny = Math.sin(phi) * Math.sin(theta);
       const nz = Math.cos(phi);
 
-      // Noise spike on the surface
       const noiseVal = simplex3(nx * 2, ny * 2, nz * 2);
       const r = OUTER_RADIUS + noiseVal * 50;
 
@@ -240,16 +281,13 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       outerPositions[i * 3 + 1] = ny * r;
       outerPositions[i * 3 + 2] = nz * r;
 
-      // Color by distance from center
       let col: [number, number, number];
       if (r > 200) {
         col = colPaleBW;
       } else if (r > 140) {
-        const t = (r - 140) / 60;
-        col = lerpColor(colMedBlue, colPaleBW, t);
+        col = lerpColor(colMedBlue, colPaleBW, (r - 140) / 60);
       } else {
-        const t = (r - 80) / 60;
-        col = lerpColor(colDeepBlue, colMedBlue, Math.max(0, t));
+        col = lerpColor(colDeepBlue, colMedBlue, Math.max(0, (r - 80) / 60));
       }
 
       outerColors[i * 3] = col[0];
@@ -268,7 +306,11 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const outerMat = new ShaderMaterial({
       vertexShader: SPHERE_VERT,
       fragmentShader: SPHERE_FRAG,
-      uniforms: { breathe: { value: 1.0 } },
+      uniforms: {
+        breathe: { value: 1.0 },
+        uGlobalAlpha: { value: 1.0 },
+        uCoreBrightness: { value: 1.0 },
+      },
       transparent: true,
       depthWrite: false,
       blending: AdditiveBlending,
@@ -288,7 +330,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const colRed = hexToRgb("#ff2800");
 
     for (let i = 0; i < INNER_COUNT; i++) {
-      // Filled sphere, denser toward center
       const r = OUTER_RADIUS * Math.pow(Math.random(), 0.35);
 
       const theta = Math.random() * Math.PI * 2;
@@ -301,16 +342,12 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       innerPositions[i * 3 + 1] = ny * r;
       innerPositions[i * 3 + 2] = nz * r;
 
-      // Color by radius
       let col: [number, number, number];
       if (r > 120) {
         col = colInnerBlue;
       } else if (r > 70) {
-        const t = (r - 70) / 50;
-        col = lerpColor(colOrange, colInnerBlue, t);
+        col = lerpColor(colOrange, colInnerBlue, (r - 70) / 50);
       } else if (r > 40) {
-        const t = (r - 40) / 30;
-        col = lerpColor(colOrange, colOrange, t); // stays orange
         col = colOrange;
       } else {
         col = colRed;
@@ -320,21 +357,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       innerColors[i * 3 + 1] = col[1];
       innerColors[i * 3 + 2] = col[2];
 
-      // Alpha by radius
       if (r > 120) {
         innerAlphas[i] = 0.20;
-      } else if (r > 70) {
-        innerAlphas[i] = 0.35;
-      } else {
-        innerAlphas[i] = 0.65;
-      }
-
-      // Size by radius
-      if (r > 120) {
         innerSizes[i] = 0.8;
       } else if (r > 70) {
+        innerAlphas[i] = 0.35;
         innerSizes[i] = 1.2;
       } else {
+        innerAlphas[i] = 0.65;
         innerSizes[i] = 1.6;
       }
     }
@@ -348,7 +378,11 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const innerMat = new ShaderMaterial({
       vertexShader: SPHERE_VERT,
       fragmentShader: SPHERE_FRAG,
-      uniforms: { breathe: { value: 1.0 } },
+      uniforms: {
+        breathe: { value: 1.0 },
+        uGlobalAlpha: { value: 1.0 },
+        uCoreBrightness: { value: 1.0 }, // animated on feeding
+      },
       transparent: true,
       depthWrite: false,
       blending: AdditiveBlending,
@@ -390,8 +424,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const tendrilAlphas = new Float32Array(tendrilTotalParticles);
     const tendrilSizes = new Float32Array(tendrilTotalParticles);
 
-    // Pre-generate tendril data
-    const tendrilBasePoints: { nx: number; ny: number; nz: number; length: number }[] = [];
+    const tendrilBasePoints: {
+      nx: number; ny: number; nz: number; length: number;
+    }[] = [];
     for (let t = 0; t < TENDRIL_COUNT; t++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
@@ -410,7 +445,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         const progress = p / PARTICLES_PER_TENDRIL;
         const dist = OUTER_RADIUS + progress * base.length;
 
-        // Noise displacement for curve
         const noiseScale = 0.05;
         const dx = simplex3(base.nx * dist * noiseScale, base.ny * dist * noiseScale + 100, base.nz * dist * noiseScale) * 30 * progress;
         const dy = simplex3(base.nx * dist * noiseScale + 200, base.ny * dist * noiseScale, base.nz * dist * noiseScale) * 30 * progress;
@@ -420,7 +454,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         tendrilPositions[idx * 3 + 1] = base.ny * dist + dy;
         tendrilPositions[idx * 3 + 2] = base.nz * dist + dz;
 
-        // Color: outer shell blue fading to transparent
         const fade = 1 - progress;
         tendrilColors[idx * 3] = colPaleBW[0] * fade;
         tendrilColors[idx * 3 + 1] = colPaleBW[1] * fade;
@@ -439,13 +472,108 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const tendrilMat = new ShaderMaterial({
       vertexShader: SPHERE_VERT,
       fragmentShader: SPHERE_FRAG,
-      uniforms: { breathe: { value: 1.0 } },
+      uniforms: {
+        breathe: { value: 1.0 },
+        uGlobalAlpha: { value: 1.0 },
+        uCoreBrightness: { value: 1.0 },
+      },
       transparent: true,
       depthWrite: false,
       blending: AdditiveBlending,
     });
 
     sphereGroup.add(new Points(tendrilGeo, tendrilMat));
+
+    // ── LAYER 5: Feeding stream — 600 particles, not part of sphere group ──────
+
+    const streamPos = new Float32Array(STREAM_COUNT * 3);
+    const streamColors = new Float32Array(STREAM_COUNT * 3);
+    const streamAlphas = new Float32Array(STREAM_COUNT);
+    const streamSizes = new Float32Array(STREAM_COUNT);
+
+    // Per-particle state (CPU side, not GPU attributes)
+    const streamT = new Float32Array(STREAM_COUNT);
+    const streamAlive = new Uint8Array(STREAM_COUNT);
+    const streamOriginX = new Float32Array(STREAM_COUNT);
+    const streamOriginY = new Float32Array(STREAM_COUNT);
+
+    for (let i = 0; i < STREAM_COUNT; i++) {
+      streamPos[i * 3] = -99999;
+      streamPos[i * 3 + 1] = -99999;
+      streamPos[i * 3 + 2] = 0;
+      streamSizes[i] = 1.0;
+    }
+
+    const streamGeo = new BufferGeometry();
+    streamGeo.setAttribute("position", new BufferAttribute(streamPos, 3));
+    streamGeo.setAttribute("aStreamColor", new BufferAttribute(streamColors, 3));
+    streamGeo.setAttribute("aStreamAlpha", new BufferAttribute(streamAlphas, 1));
+    streamGeo.setAttribute("size", new BufferAttribute(streamSizes, 1));
+
+    const streamMat = new ShaderMaterial({
+      vertexShader: STREAM_VERT,
+      fragmentShader: STREAM_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    });
+
+    // Added to scene directly — NOT sphereGroup — so it doesn't rotate
+    scene.add(new Points(streamGeo, streamMat));
+
+    // Stream color palettes (percolation reference)
+    const colCyan = hexToRgb("#00ccff");
+    const colAmber = hexToRgb("#ffaa00");
+    const colDeepRed = hexToRgb("#ff2800");
+
+    // ── Dynamic state ─────────────────────────────────────────────────────────
+
+    let feedActive = false;
+    let feedTargetWorldX = 0;
+    let feedTargetWorldY = 0;
+    let coreBrightness = 1.0;
+    let coreBrightnessTarget = 1.0;
+    let globalAlpha = 1.0;
+    let globalAlphaTarget = 1.0;
+
+    // ── Event handlers ────────────────────────────────────────────────────────
+
+    const onStartFeeding = () => {
+      feedActive = true;
+      coreBrightnessTarget = 2.2;
+      const [wx, wy] = screenToWorld(width * 0.5, height * 0.18);
+      feedTargetWorldX = wx;
+      feedTargetWorldY = wy;
+    };
+
+    const onStopFeeding = () => {
+      feedActive = false;
+      coreBrightnessTarget = 1.0;
+      // Kill all stream particles immediately
+      for (let i = 0; i < STREAM_COUNT; i++) {
+        streamAlive[i] = 0;
+        streamPos[i * 3] = -99999;
+        streamPos[i * 3 + 1] = -99999;
+        streamAlphas[i] = 0;
+      }
+      (streamGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
+      (streamGeo.getAttribute("aStreamAlpha") as BufferAttribute).needsUpdate = true;
+    };
+
+    const onCharConsumed = (e: Event) => {
+      const { x, y } = (e as CustomEvent<{ x: number; y: number }>).detail;
+      [feedTargetWorldX, feedTargetWorldY] = screenToWorld(x, y);
+    };
+
+    const handleDim = (e: Event) => {
+      const dim = (e as CustomEvent<boolean>).detail;
+      globalAlphaTarget = dim ? 0.12 : 1.0;
+    };
+
+    window.addEventListener("creature-start-feeding", onStartFeeding);
+    window.addEventListener("creature-stop-feeding", onStopFeeding);
+    window.addEventListener("creature-char-consumed", onCharConsumed);
+    window.addEventListener("creature-dim", handleDim);
 
     // ── Animation loop ────────────────────────────────────────────────────────
 
@@ -454,15 +582,97 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     function animate() {
       time += 0.016;
 
-      // Breathing
+      // ── Breathing ──────────────────────────────────────────────────────────
       const breathe = Math.sin(time * 0.4) * 0.035 + 1.0;
       outerMat.uniforms.breathe.value = breathe;
       innerMat.uniforms.breathe.value = breathe;
       tendrilMat.uniforms.breathe.value = breathe;
 
-      // Rotation
+      // ── Rotation ───────────────────────────────────────────────────────────
       sphereGroup.rotation.y += 0.0006;
       sphereGroup.rotation.x += 0.00015;
+
+      // ── Part C: Core brightness (feeding response) ─────────────────────────
+      // Ramp up fast (40 frames), decay slow (120 frames)
+      const brightnessLerp = coreBrightness < coreBrightnessTarget ? 0.05 : 0.015;
+      coreBrightness += (coreBrightnessTarget - coreBrightness) * brightnessLerp;
+      innerMat.uniforms.uCoreBrightness.value = coreBrightness;
+      // Pulse sprite scale with brightness
+      const spriteScale = 120 * (0.5 + 0.5 * coreBrightness);
+      glowSprite.scale.set(spriteScale, spriteScale, 1);
+
+      // ── Part D: Global dim (search overlay) ────────────────────────────────
+      const alphaLerp = globalAlphaTarget < globalAlpha ? 0.05 : 0.04;
+      globalAlpha += (globalAlphaTarget - globalAlpha) * alphaLerp;
+      outerMat.uniforms.uGlobalAlpha.value = globalAlpha;
+      innerMat.uniforms.uGlobalAlpha.value = globalAlpha;
+      tendrilMat.uniforms.uGlobalAlpha.value = globalAlpha;
+      glowMat.opacity = globalAlpha;
+
+      // ── Part B: Stream particle system ─────────────────────────────────────
+      if (feedActive) {
+        // Emit 8 particles per frame from current target position
+        const spreadWorld = (80 / height) * visibleHalfH * 2;
+        let emitted = 0;
+        for (let i = 0; i < STREAM_COUNT && emitted < 8; i++) {
+          if (!streamAlive[i]) {
+            streamAlive[i] = 1;
+            streamT[i] = 0;
+            streamOriginX[i] = feedTargetWorldX + (Math.random() - 0.5) * spreadWorld;
+            streamOriginY[i] = feedTargetWorldY;
+            emitted++;
+          }
+        }
+      }
+
+      // Update all alive stream particles
+      const posArr = streamGeo.getAttribute("position").array as Float32Array;
+      const colArr = streamGeo.getAttribute("aStreamColor").array as Float32Array;
+      const alphaArr = streamGeo.getAttribute("aStreamAlpha").array as Float32Array;
+
+      for (let i = 0; i < STREAM_COUNT; i++) {
+        if (!streamAlive[i]) continue;
+
+        streamT[i] += 0.008 + Math.random() * 0.003;
+        const t = streamT[i];
+
+        if (t >= 1.0) {
+          streamAlive[i] = 0;
+          posArr[i * 3] = -99999;
+          posArr[i * 3 + 1] = -99999;
+          posArr[i * 3 + 2] = 0;
+          alphaArr[i] = 0;
+          continue;
+        }
+
+        // Arc: lerp from origin to sphere center (0,0), sine wiggle
+        posArr[i * 3] = streamOriginX[i] * (1 - t)
+          + Math.sin(t * Math.PI + i * 0.3) * 30;
+        posArr[i * 3 + 1] = streamOriginY[i] * (1 - t);
+        posArr[i * 3 + 2] = 0;
+
+        // Age-based color: cyan → amber → deep red (percolation reference)
+        let col: [number, number, number];
+        if (t < 0.3) {
+          col = lerpColor(colCyan, colAmber, t / 0.3);
+        } else if (t < 0.7) {
+          col = lerpColor(colAmber, colDeepRed, (t - 0.3) / 0.4);
+        } else {
+          col = colDeepRed;
+        }
+        colArr[i * 3] = col[0];
+        colArr[i * 3 + 1] = col[1];
+        colArr[i * 3 + 2] = col[2];
+
+        // Alpha: fade in (0→0.1), full (0.1→0.8), fade out (0.8→1.0)
+        const fadeIn = Math.min(1, t / 0.1);
+        const fadeOut = Math.max(0, 1 - Math.max(0, (t - 0.8) / 0.2));
+        alphaArr[i] = 0.6 * fadeIn * fadeOut;
+      }
+
+      (streamGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
+      (streamGeo.getAttribute("aStreamColor") as BufferAttribute).needsUpdate = true;
+      (streamGeo.getAttribute("aStreamAlpha") as BufferAttribute).needsUpdate = true;
 
       composer.render();
       animFrameRef.current = window.requestAnimationFrame(animate);
@@ -475,7 +685,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     function onResize() {
       width = window.innerWidth;
       height = window.innerHeight;
-      const aspect = width / height;
+      aspect = width / height;
       renderer.setSize(width, height);
       composer.setSize(width, height);
       camera.left = -visibleHalfH * aspect;
@@ -492,12 +702,18 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     return () => {
       window.cancelAnimationFrame(animFrameRef.current);
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("creature-start-feeding", onStartFeeding);
+      window.removeEventListener("creature-stop-feeding", onStopFeeding);
+      window.removeEventListener("creature-char-consumed", onCharConsumed);
+      window.removeEventListener("creature-dim", handleDim);
       outerGeo.dispose();
       outerMat.dispose();
       innerGeo.dispose();
       innerMat.dispose();
       tendrilGeo.dispose();
       tendrilMat.dispose();
+      streamGeo.dispose();
+      streamMat.dispose();
       glowTexture.dispose();
       glowMat.dispose();
       composer.dispose();
