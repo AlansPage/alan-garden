@@ -33,9 +33,10 @@ function lerp(a: number, b: number, t: number): number {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ORGAN_COUNT = 5;
-const PARTICLES_PER_ORGAN = 400;
+const PARTICLES_PER_ORGAN_OUTER = 12000;
+const PARTICLES_PER_ORGAN_INNER = 8000;
 const STREAM_COUNT = 5;
-const PARTICLES_PER_STREAM = 40;
+const PARTICLES_PER_STREAM = 80;
 const PSEUDOPOD_COUNT = 1800;
 const FEED_PARTICLE_MAX = 1000;
 
@@ -78,7 +79,7 @@ const ORGAN_BASE_SPEEDS = [
 
 // ── Shaders ───────────────────────────────────────────────────────────────────
 
-// Organ / pseudopod / feed-particle: per-particle size + color
+// Shared vertex: size is already in pixels — no projection-space multiplier
 const ORGAN_VERT = /* glsl */ `
   attribute float size;
   attribute vec3 color;
@@ -86,34 +87,66 @@ const ORGAN_VERT = /* glsl */ `
   void main() {
     vColor = color;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = size * (150.0 / -mvPosition.z);
+    gl_PointSize = size;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
 
-const ORGAN_FRAG = /* glsl */ `
+// Outer shell: very faint — density creates the glow, not brightness per particle
+const OUTER_FRAG = /* glsl */ `
   varying vec3 vColor;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
     float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(vColor, alpha * 0.35);
+    gl_FragColor = vec4(vColor, alpha * 0.25);
   }
 `;
 
-// Core organ: same vertex, fragment adds brightness uniform
-const CORE_FRAG = /* glsl */ `
+// Inner mass vertex: also passes coreZone flag to fragment
+const INNER_VERT = /* glsl */ `
+  attribute float size;
+  attribute vec3 color;
+  attribute float coreZone;
+  varying vec3 vColor;
+  varying float vCoreZone;
+  void main() {
+    vColor = color;
+    vCoreZone = coreZone;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = size;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+// Inner mass: alpha 0.45 outer zone, 0.75 core zone (r < 40)
+const INNER_FRAG = /* glsl */ `
+  varying vec3 vColor;
+  varying float vCoreZone;
+  void main() {
+    float d = length(gl_PointCoord - vec2(0.5));
+    float alpha = max(0.0, 1.0 - (d * 2.2));
+    alpha = pow(alpha, 1.4);
+    float a = mix(0.45, 0.75, vCoreZone);
+    gl_FragColor = vec4(vColor, alpha * a);
+  }
+`;
+
+// Core organ inner mass: brightness uniform for seek/feed animation
+const CORE_INNER_FRAG = /* glsl */ `
   uniform float brightness;
   varying vec3 vColor;
+  varying float vCoreZone;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
     float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(vColor * brightness, alpha * 0.35);
+    float a = mix(0.45, 0.75, vCoreZone);
+    gl_FragColor = vec4(vColor * brightness, alpha * a);
   }
 `;
 
-// Pseudopod: same vertex, fragment has alpha uniform for 70% opacity
+// Pseudopod: uAlpha uniform for fade in/out
 const PSEUDOPOD_FRAG = /* glsl */ `
   uniform float uAlpha;
   varying vec3 vColor;
@@ -125,12 +158,12 @@ const PSEUDOPOD_FRAG = /* glsl */ `
   }
 `;
 
-// Streams: size attribute only, always white
+// Streams: whisper-thin threads, barely visible
 const STREAM_VERT = /* glsl */ `
   attribute float size;
   void main() {
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = size * (150.0 / -mvPosition.z);
+    gl_PointSize = size;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -140,7 +173,7 @@ const STREAM_FRAG = /* glsl */ `
     float d = length(gl_PointCoord - vec2(0.5));
     float alpha = max(0.0, 1.0 - (d * 2.2));
     alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(1.0, 1.0, 1.0, alpha * 0.22);
+    gl_FragColor = vec4(1.0, 1.0, 1.0, alpha * 0.18);
   }
 `;
 
@@ -306,7 +339,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     // ── Three.js core ─────────────────────────────────────────────────────────
 
-    const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
+    const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(width, height);
     renderer.setClearColor(0x000000, 0); // alpha 0 = transparent, CSS black shows through
@@ -333,11 +366,17 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     // Expose to triggerFeed
     threeRef.current = { organCenters, scene };
 
-    // ── Organs ────────────────────────────────────────────────────────────────
+    // ── Organs — two particle layers each ────────────────────────────────────
+    //   Outer shell: sparse halo, 1.2px, alpha*0.25
+    //   Inner mass:  dense core, 1.6px (2.0px inside r<40), alpha*0.45/0.75
 
-    const organGeos: BufferGeometry[] = [];
-    const organMats: ShaderMaterial[] = [];
-    const organBaseOffsets: Float32Array[] = [];
+    const organOuterGeos: BufferGeometry[] = [];
+    const organOuterMats: ShaderMaterial[] = [];
+    const organOuterOffsets: Float32Array[] = [];
+
+    const organInnerGeos: BufferGeometry[] = [];
+    const organInnerMats: ShaderMaterial[] = [];
+    const organInnerOffsets: Float32Array[] = [];
 
     const organPulsePhase = Array.from(
       { length: ORGAN_COUNT },
@@ -346,54 +385,105 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     for (let o = 0; o < ORGAN_COUNT; o++) {
       const [cx, cy] = organCenters[o];
-      const sigmaX = 35 + Math.random() * 10;
-      const sigmaY = 28 + Math.random() * 10;
       const [coreColor, edgeColor] = ORGAN_COLORS[o];
+      const isCore = o === 4;
 
-      const positions = new Float32Array(PARTICLES_PER_ORGAN * 3);
-      const colors = new Float32Array(PARTICLES_PER_ORGAN * 3);
-      const sizes = new Float32Array(PARTICLES_PER_ORGAN);
-      const offsets = new Float32Array(PARTICLES_PER_ORGAN * 3);
+      // ── Outer shell ──────────────────────────────────────────────────────
+      const outerSigmaX = 55 + Math.random() * 15; // 55–70px
+      const outerSigmaY = 45 + Math.random() * 12; // 45–57px
 
-      for (let i = 0; i < PARTICLES_PER_ORGAN; i++) {
-        const ox = gauss(sigmaX);
-        const oy = gauss(sigmaY);
-        offsets[i * 3] = ox;
-        offsets[i * 3 + 1] = oy;
-        positions[i * 3] = cx + ox;
-        positions[i * 3 + 1] = cy + oy;
+      const outerPositions = new Float32Array(PARTICLES_PER_ORGAN_OUTER * 3);
+      const outerColors = new Float32Array(PARTICLES_PER_ORGAN_OUTER * 3);
+      const outerSizes = new Float32Array(PARTICLES_PER_ORGAN_OUTER).fill(1.2);
+      const outerOffsets = new Float32Array(PARTICLES_PER_ORGAN_OUTER * 3);
+
+      for (let i = 0; i < PARTICLES_PER_ORGAN_OUTER; i++) {
+        const ox = gauss(outerSigmaX);
+        const oy = gauss(outerSigmaY);
+        outerOffsets[i * 3] = ox;
+        outerOffsets[i * 3 + 1] = oy;
+        outerPositions[i * 3] = cx + ox;
+        outerPositions[i * 3 + 1] = cy + oy;
+
+        // Color lerps from core to edge based on normalized radius
+        const life = Math.min(
+          1.0,
+          Math.sqrt((ox / outerSigmaX) ** 2 + (oy / outerSigmaY) ** 2)
+        );
+        outerColors[i * 3] = coreColor[0] + (edgeColor[0] - coreColor[0]) * life;
+        outerColors[i * 3 + 1] = coreColor[1] + (edgeColor[1] - coreColor[1]) * life;
+        outerColors[i * 3 + 2] = coreColor[2] + (edgeColor[2] - coreColor[2]) * life;
+      }
+
+      const outerGeo = new BufferGeometry();
+      outerGeo.setAttribute("position", new BufferAttribute(outerPositions, 3));
+      outerGeo.setAttribute("color", new BufferAttribute(outerColors, 3));
+      outerGeo.setAttribute("size", new BufferAttribute(outerSizes, 1));
+
+      const outerMat = new ShaderMaterial({
+        vertexShader: ORGAN_VERT,
+        fragmentShader: OUTER_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      });
+
+      scene.add(new Points(outerGeo, outerMat));
+      organOuterGeos.push(outerGeo);
+      organOuterMats.push(outerMat);
+      organOuterOffsets.push(outerOffsets);
+
+      // ── Inner mass ───────────────────────────────────────────────────────
+      const innerSigmaX = 30 + Math.random() * 8; // 30–38px
+      const innerSigmaY = 24 + Math.random() * 6; // 24–30px
+
+      const innerPositions = new Float32Array(PARTICLES_PER_ORGAN_INNER * 3);
+      const innerColors = new Float32Array(PARTICLES_PER_ORGAN_INNER * 3);
+      const innerSizes = new Float32Array(PARTICLES_PER_ORGAN_INNER);
+      const innerCoreZones = new Float32Array(PARTICLES_PER_ORGAN_INNER);
+      const innerOffsets = new Float32Array(PARTICLES_PER_ORGAN_INNER * 3);
+
+      for (let i = 0; i < PARTICLES_PER_ORGAN_INNER; i++) {
+        const ox = gauss(innerSigmaX);
+        const oy = gauss(innerSigmaY);
+        innerOffsets[i * 3] = ox;
+        innerOffsets[i * 3 + 1] = oy;
+        innerPositions[i * 3] = cx + ox;
+        innerPositions[i * 3 + 1] = cy + oy;
+
+        // Particles within 40px radius are "core zone" — larger, brighter
+        const r = Math.sqrt(ox * ox + oy * oy);
+        innerSizes[i] = r < 40 ? 2.0 : 1.6;
+        innerCoreZones[i] = r < 40 ? 1.0 : 0.0;
 
         const life = Math.min(
           1.0,
-          Math.sqrt((ox / sigmaX) ** 2 + (oy / sigmaY) ** 2)
+          Math.sqrt((ox / innerSigmaX) ** 2 + (oy / innerSigmaY) ** 2)
         );
-        colors[i * 3] = coreColor[0] + (edgeColor[0] - coreColor[0]) * life;
-        colors[i * 3 + 1] =
-          coreColor[1] + (edgeColor[1] - coreColor[1]) * life;
-        colors[i * 3 + 2] =
-          coreColor[2] + (edgeColor[2] - coreColor[2]) * life;
-        sizes[i] = 0.6 + Math.random() * 0.4;
+        innerColors[i * 3] = coreColor[0] + (edgeColor[0] - coreColor[0]) * life;
+        innerColors[i * 3 + 1] = coreColor[1] + (edgeColor[1] - coreColor[1]) * life;
+        innerColors[i * 3 + 2] = coreColor[2] + (edgeColor[2] - coreColor[2]) * life;
       }
 
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(positions, 3));
-      geo.setAttribute("color", new BufferAttribute(colors, 3));
-      geo.setAttribute("size", new BufferAttribute(sizes, 1));
+      const innerGeo = new BufferGeometry();
+      innerGeo.setAttribute("position", new BufferAttribute(innerPositions, 3));
+      innerGeo.setAttribute("color", new BufferAttribute(innerColors, 3));
+      innerGeo.setAttribute("size", new BufferAttribute(innerSizes, 1));
+      innerGeo.setAttribute("coreZone", new BufferAttribute(innerCoreZones, 1));
 
-      const isCore = o === 4;
-      const mat = new ShaderMaterial({
-        vertexShader: ORGAN_VERT,
-        fragmentShader: isCore ? CORE_FRAG : ORGAN_FRAG,
+      const innerMat = new ShaderMaterial({
+        vertexShader: INNER_VERT,
+        fragmentShader: isCore ? CORE_INNER_FRAG : INNER_FRAG,
         uniforms: isCore ? { brightness: { value: 1.0 } } : {},
         transparent: true,
         depthWrite: false,
         blending: AdditiveBlending,
       });
 
-      scene.add(new Points(geo, mat));
-      organGeos.push(geo);
-      organMats.push(mat);
-      organBaseOffsets.push(offsets);
+      scene.add(new Points(innerGeo, innerMat));
+      organInnerGeos.push(innerGeo);
+      organInnerMats.push(innerMat);
+      organInnerOffsets.push(innerOffsets);
     }
 
     // ── Streams ───────────────────────────────────────────────────────────────
@@ -403,7 +493,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     for (let s = 0; s < STREAM_COUNT; s++) {
       const positions = new Float32Array(PARTICLES_PER_STREAM * 3);
-      const sizes = new Float32Array(PARTICLES_PER_STREAM).fill(0.7);
+      const sizes = new Float32Array(PARTICLES_PER_STREAM).fill(0.8);
 
       const geo = new BufferGeometry();
       geo.setAttribute("position", new BufferAttribute(positions, 3));
@@ -467,7 +557,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const feedMat = new ShaderMaterial({
       vertexShader: ORGAN_VERT,
-      fragmentShader: ORGAN_FRAG,
+      fragmentShader: OUTER_FRAG,
       transparent: true,
       depthWrite: false,
       blending: AdditiveBlending,
@@ -722,22 +812,35 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         // Skip position update if organ is essentially static
         if (Math.abs(scale - 1.0) < 0.001) continue;
 
-        const offsets = organBaseOffsets[o];
-        const posAttr = organGeos[o].getAttribute(
+        // Update outer shell
+        const outerOffsets = organOuterOffsets[o];
+        const outerPosAttr = organOuterGeos[o].getAttribute(
           "position"
         ) as BufferAttribute;
-        const arr = posAttr.array as Float32Array;
-
-        for (let i = 0; i < PARTICLES_PER_ORGAN; i++) {
-          arr[i * 3] = cx + offsets[i * 3] * scale;
-          arr[i * 3 + 1] = cy + offsets[i * 3 + 1] * scale;
-          arr[i * 3 + 2] = 0;
+        const outerArr = outerPosAttr.array as Float32Array;
+        for (let i = 0; i < PARTICLES_PER_ORGAN_OUTER; i++) {
+          outerArr[i * 3] = cx + outerOffsets[i * 3] * scale;
+          outerArr[i * 3 + 1] = cy + outerOffsets[i * 3 + 1] * scale;
+          outerArr[i * 3 + 2] = 0;
         }
-        posAttr.needsUpdate = true;
+        outerPosAttr.needsUpdate = true;
+
+        // Update inner mass
+        const innerOffsets = organInnerOffsets[o];
+        const innerPosAttr = organInnerGeos[o].getAttribute(
+          "position"
+        ) as BufferAttribute;
+        const innerArr = innerPosAttr.array as Float32Array;
+        for (let i = 0; i < PARTICLES_PER_ORGAN_INNER; i++) {
+          innerArr[i * 3] = cx + innerOffsets[i * 3] * scale;
+          innerArr[i * 3 + 1] = cy + innerOffsets[i * 3 + 1] * scale;
+          innerArr[i * 3 + 2] = 0;
+        }
+        innerPosAttr.needsUpdate = true;
       }
 
       // Core brightness: base oscillation + seek/feed extra
-      const coreMat = organMats[4];
+      const coreMat = organInnerMats[4] as ShaderMaterial;
       coreMat.uniforms.brightness.value =
         Math.sin(time * 1.4) * 0.3 + 1.0 + coreBrightExtra;
 
@@ -835,8 +938,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       }
 
       for (let o = 0; o < ORGAN_COUNT; o++) {
-        organGeos[o].dispose();
-        organMats[o].dispose();
+        organOuterGeos[o].dispose();
+        organOuterMats[o].dispose();
+        organInnerGeos[o].dispose();
+        organInnerMats[o].dispose();
       }
       for (let s = 0; s < STREAM_COUNT; s++) {
         streamGeos[s].dispose();
