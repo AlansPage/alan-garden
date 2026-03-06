@@ -530,3 +530,53 @@ canvas.creature-canvas {
 .return-to-void:hover {
   color: rgba(255, 255, 255, 0.8);
 }
+
+/* ── Drop-to-feed ingestion UI ───────────────────────────────────────────── */
+
+.drop-zone-hint {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: rgba(232, 255, 0, 0.7);
+  z-index: 20;
+  animation: pulse-text 0.8s ease-in-out infinite;
+}
+
+.drop-zone-ingesting {
+  color: rgba(255, 100, 0, 0.9);
+}
+
+.drop-zone-done {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  z-index: 20;
+}
+
+.drop-zone-consumed {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.drop-zone-open {
+  color: #e8ff00;
+  text-decoration: none;
+  letter-spacing: 0.12em;
+}
+
+.drop-zone-open:hover {
+  text-decoration: underline;
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1.0; }
+}

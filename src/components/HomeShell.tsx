@@ -27,6 +27,12 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dropState, setDropState] = useState<
+    "idle" | "hovering" | "ingesting" | "done"
+  >("idle");
+  const [ingestedTitle, setIngestedTitle] = useState<string | null>(null);
+  const [ingestedSlug, setIngestedSlug] = useState<string | null>(null);
+  const dragCounterRef = useRef(0);
 
   const fuse = useMemo(
     () =>
@@ -119,6 +125,91 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
     };
   }, [open, results, activeIndex, router]);
 
+  useEffect(() => {
+    const onDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current++;
+      const items = e.dataTransfer?.items;
+      const hasFile = Array.from(items ?? []).some((i) => i.kind === "file");
+      if (hasFile) setDropState("hovering");
+    };
+
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current--;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setDropState("idle");
+      }
+    };
+
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "copy";
+    };
+
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+
+      const file = e.dataTransfer?.files[0];
+      if (!file || !file.name.endsWith(".md")) {
+        setDropState("idle");
+        return;
+      }
+
+      setDropState("ingesting");
+      dispatchDim(true);
+
+      const content = await file.text();
+
+      window.dispatchEvent(new CustomEvent("creature-start-feeding"));
+
+      try {
+        const res = await fetch("/api/ingest-note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, content }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          setDropState("done");
+          setIngestedTitle(data.title);
+          setIngestedSlug(data.slug);
+
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
+            dispatchDim(false);
+          }, 4000);
+
+          setTimeout(() => {
+            setDropState("idle");
+            setIngestedTitle(null);
+            setIngestedSlug(null);
+          }, 8000);
+        }
+      } catch {
+        setDropState("idle");
+        window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
+        dispatchDim(false);
+      }
+    };
+
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
   const onSearchBarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
     openOverlay();
@@ -181,7 +272,38 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
           VAULT_STATUS: {stats.noteCount} NOTES · {stats.essayCount} ESSAYS ·
           LAST_UPDATE: {stats.lastUpdate}
         </div>
+
+        {dropState === "hovering" && (
+          <div className="drop-zone-hint">RELEASE TO INGEST</div>
+        )}
+
+        {dropState === "ingesting" && (
+          <div className="drop-zone-hint drop-zone-ingesting">INGESTING...</div>
+        )}
+
+        {dropState === "done" && ingestedTitle && (
+          <div className="drop-zone-done">
+            <span className="drop-zone-consumed">
+              NOTE CONSUMED: {ingestedTitle}
+            </span>
+            <a href={`/notes/${ingestedSlug}`} className="drop-zone-open">
+              OPEN →
+            </a>
+          </div>
+        )}
       </main>
+
+      {dropState === "hovering" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            border: "1px solid rgba(232,255,0,0.1)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        />
+      )}
 
       {open && (
         <div
