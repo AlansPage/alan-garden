@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
 import { getAllNotes, getNoteBySlug } from "@/lib/vault";
-import NotePageClient from "@/components/NotePageClient";
+import NoteShell from "@/components/NoteShell";
 
 interface NotePageProps {
   params: {
@@ -40,7 +40,7 @@ export default function NotePage({ params }: NotePageProps) {
   const mdx = <MDXRemote source={transformed} />;
 
   return (
-    <NotePageClient
+    <NoteShell
       slug={note.slug}
       title={note.frontmatter.title}
       status={note.frontmatter.status}
@@ -53,7 +53,7 @@ export default function NotePage({ params }: NotePageProps) {
       backlinks={note.backlinks}
     >
       {mdx}
-    </NotePageClient>
+    </NoteShell>
   );
 }
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { RefObject, useEffect, useRef } from "react";
 import Link from "next/link";
+import { CreatureRef } from "./CreatureCanvas";
 
 type NoteStatus = "seedling" | "budding" | "evergreen";
 
@@ -23,6 +24,7 @@ interface NotePageClientProps {
   minutes: number;
   backlinks: Backlink[];
   children: React.ReactNode;
+  creatureRef?: RefObject<CreatureRef | null>;
 }
 
 export default function NotePageClient({
@@ -37,6 +39,7 @@ export default function NotePageClient({
   minutes,
   backlinks,
   children,
+  creatureRef,
 }: NotePageClientProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -44,10 +47,22 @@ export default function NotePageClient({
     const root = rootRef.current;
     if (!root) return;
 
+    // Notify the creature that a note has been opened — fire-and-forget
+    creatureRef?.current?.triggerFeed(
+      window.innerWidth / 2,
+      window.innerHeight / 2,
+      { wordCount, tags }
+    );
+
+    // ── Character wrapping ────────────────────────────────────────────────────
+    // Restrict to the note body element only (not header / backlinks)
+    const noteBody = root.querySelector<HTMLElement>(".note-body");
+    if (!noteBody) return;
+
     let index = 0;
 
     const walker = document.createTreeWalker(
-      root,
+      noteBody,
       NodeFilter.SHOW_TEXT,
       {
         acceptNode(node: Node) {
@@ -55,11 +70,12 @@ export default function NotePageClient({
             return NodeFilter.FILTER_REJECT;
           }
 
+          // Skip blockquote, code, pre descendants
           let current: Node | null = node;
-          while (current && current !== root) {
+          while (current && current !== noteBody) {
             if (current instanceof HTMLElement) {
               const tag = current.tagName.toLowerCase();
-              if (tag === "code" || tag === "pre" || tag === "blockquote") {
+              if (tag === "blockquote" || tag === "code" || tag === "pre") {
                 return NodeFilter.FILTER_REJECT;
               }
             }
@@ -85,7 +101,8 @@ export default function NotePageClient({
       for (let i = 0; i < text.length; i++) {
         const span = document.createElement("span");
         span.className = "char";
-        span.dataset.index = String(index++);
+        span.dataset.charIndex = String(index++);
+        span.style.display = "inline-block";
         span.textContent = text[i];
         frag.appendChild(span);
       }
@@ -94,8 +111,9 @@ export default function NotePageClient({
       }
     }
 
+    // ── Consumption setup ─────────────────────────────────────────────────────
     const paragraphs = Array.from(
-      root.querySelectorAll<HTMLElement>(".note-body p")
+      noteBody.querySelectorAll<HTMLElement>("p")
     );
 
     type EdgeState = {
@@ -108,7 +126,8 @@ export default function NotePageClient({
 
     const edgeStates: EdgeState[] = paragraphs.map((p) => {
       const spans = Array.from(p.querySelectorAll<HTMLSpanElement>(".char"));
-      const limit = Math.floor(spans.length * 0.4);
+      // Never consume more than 35% of any paragraph
+      const limit = Math.floor(spans.length * 0.35);
       return {
         spans,
         left: 0,
@@ -128,10 +147,10 @@ export default function NotePageClient({
       if (candidates.length === 0) return null;
       const s = candidates[Math.floor(Math.random() * candidates.length)];
 
-      const fromLeft =
-        Math.random() < 0.5 || s.left === 0 || s.right === s.spans.length - 1;
-      const index = fromLeft ? s.left : s.right;
-      const span = s.spans[index];
+      // Alternate edges; bias toward whichever has more to offer
+      const fromLeft = Math.random() < 0.5;
+      const idx = fromLeft ? s.left : s.right;
+      const span = s.spans[idx];
 
       if (fromLeft) s.left += 1;
       else s.right -= 1;
@@ -139,19 +158,14 @@ export default function NotePageClient({
       return span;
     };
 
-    if (!hasCapacity()) {
-      return;
-    }
+    if (!hasCapacity()) return;
 
-    window.dispatchEvent(
-      new CustomEvent("creature-start-feeding", {
-        detail: {
-          targetRect: root
-            .querySelector(".note-body")
-            ?.getBoundingClientRect(),
-        },
-      })
+    const consumptionRate = Math.min(
+      8,
+      3 + Math.floor(wordCount / 200)
     );
+    // Interval in ms so we hit consumptionRate chars/sec
+    const intervalMs = Math.round(1000 / consumptionRate);
 
     const interval = window.setInterval(() => {
       if (!hasCapacity()) {
@@ -160,33 +174,32 @@ export default function NotePageClient({
         return;
       }
 
-      const count = 3 + Math.floor(Math.random() * 3); // 3–5 characters
-      for (let i = 0; i < count; i++) {
-        const span = pickNextSpan();
-        if (!span) break;
+      const span = pickNextSpan();
+      if (!span) return;
 
-        span.classList.add("char-targeted");
+      const rect = span.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
 
-        const rect = span.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
+      // Signal the creature so it can spawn particles at this char's position
+      window.dispatchEvent(
+        new CustomEvent("creature-char-consumed", {
+          detail: { x: cx, y: cy },
+        })
+      );
 
-        window.dispatchEvent(
-          new CustomEvent("creature-char-consumed", {
-            detail: { x: centerX, y: centerY },
-          })
-        );
-
-        window.setTimeout(() => {
-          span.classList.add("char-consumed");
-        }, 300);
-      }
-    }, 1000);
+      // CSS transition: highlight then dissolve
+      span.classList.add("char-targeted");
+      window.setTimeout(() => {
+        span.classList.add("char-consumed");
+      }, 200);
+    }, intervalMs);
 
     return () => {
-      window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
       window.clearInterval(interval);
+      window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
 
   return (
@@ -219,7 +232,9 @@ export default function NotePageClient({
         )}
       </header>
 
-      <article className="note-body">{children}</article>
+      <article data-note-body className="note-body">
+        {children}
+      </article>
 
       {backlinks.length > 0 && (
         <section className="note-backlinks">
@@ -244,4 +259,3 @@ export default function NotePageClient({
     </div>
   );
 }
-
