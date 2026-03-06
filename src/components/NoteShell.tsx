@@ -24,6 +24,8 @@ interface NoteShellProps {
   minutes: number;
   backlinks: Backlink[];
   children: React.ReactNode;
+  disableFeeding?: boolean;
+  isEssay?: boolean;
 }
 
 export default function NoteShell(props: NoteShellProps) {

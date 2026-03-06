@@ -25,6 +25,8 @@ interface NotePageClientProps {
   backlinks: Backlink[];
   children: React.ReactNode;
   creatureRef?: RefObject<CreatureRef | null>;
+  disableFeeding?: boolean;
+  isEssay?: boolean;
 }
 
 export default function NotePageClient({
@@ -40,6 +42,8 @@ export default function NotePageClient({
   backlinks,
   children,
   creatureRef,
+  disableFeeding = false,
+  isEssay = false,
 }: NotePageClientProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -48,11 +52,13 @@ export default function NotePageClient({
     if (!root) return;
 
     // Notify the creature that a note has been opened — fire-and-forget
-    creatureRef?.current?.triggerFeed(
-      window.innerWidth / 2,
-      window.innerHeight / 2,
-      { wordCount, tags }
-    );
+    if (!disableFeeding) {
+      creatureRef?.current?.triggerFeed(
+        window.innerWidth / 2,
+        window.innerHeight / 2,
+        { wordCount, tags }
+      );
+    }
 
     // ── Character wrapping ────────────────────────────────────────────────────
     // Restrict to the note body element only (not header / backlinks)
@@ -158,7 +164,7 @@ export default function NotePageClient({
       return span;
     };
 
-    if (!hasCapacity()) return;
+    if (!hasCapacity() || disableFeeding) return;
 
     const consumptionRate = Math.min(
       8,
@@ -232,7 +238,7 @@ export default function NotePageClient({
         )}
       </header>
 
-      <article data-note-body className="note-body">
+      <article data-note-body className={isEssay ? "note-body essay-body" : "note-body"}>
         {children}
       </article>
 
