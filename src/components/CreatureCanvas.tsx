@@ -84,8 +84,8 @@ function simplex3(xin: number, yin: number, zin: number): number {
 
 const OUTER_COUNT = 14000;
 const INNER_COUNT = 10000;
-const TENDRIL_COUNT = 8;
-const PARTICLES_PER_TENDRIL = 200;
+const TENDRIL_COUNT = 16;
+const PARTICLES_PER_TENDRIL = 280;
 const OUTER_RADIUS = 260;
 const STREAM_COUNT = 600;
 
@@ -245,9 +245,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.5,
-      0.25,
-      0.55
+      0.75,
+      0.35,
+      0.42
     );
     composer.addPass(bloomPass);
 
@@ -275,7 +275,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       const nz = Math.cos(phi);
 
       const noiseVal = simplex3(nx * 2, ny * 2, nz * 2);
-      const r = OUTER_RADIUS + noiseVal * 50;
+      const r = OUTER_RADIUS + noiseVal * 95;
 
       outerPositions[i * 3] = nx * r;
       outerPositions[i * 3 + 1] = ny * r;
@@ -293,8 +293,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       outerColors[i * 3] = col[0];
       outerColors[i * 3 + 1] = col[1];
       outerColors[i * 3 + 2] = col[2];
-      outerAlphas[i] = 0.15;
-      outerSizes[i] = 0.9;
+      outerAlphas[i] = 0.22;
+      outerSizes[i] = 1.1;
     }
 
     const outerGeo = new BufferGeometry();
@@ -361,11 +361,11 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         innerAlphas[i] = 0.20;
         innerSizes[i] = 0.8;
       } else if (r > 70) {
-        innerAlphas[i] = 0.35;
-        innerSizes[i] = 1.2;
-      } else {
-        innerAlphas[i] = 0.65;
+        innerAlphas[i] = 0.50;
         innerSizes[i] = 1.6;
+      } else {
+        innerAlphas[i] = 0.92;
+        innerSizes[i] = 2.6;
       }
     }
 
@@ -397,9 +397,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     glowCanvas.height = 128;
     const ctx = glowCanvas.getContext("2d")!;
     const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, "rgba(255, 60, 0, 1.0)");
-    gradient.addColorStop(0.3, "rgba(255, 30, 0, 0.6)");
-    gradient.addColorStop(0.6, "rgba(200, 20, 0, 0.15)");
+    gradient.addColorStop(0, "rgba(255, 255, 220, 1.0)");
+    gradient.addColorStop(0.2, "rgba(255, 80, 0, 0.9)");
+    gradient.addColorStop(0.45, "rgba(200, 10, 0, 0.5)");
+    gradient.addColorStop(0.7, "rgba(80, 0, 0, 0.15)");
     gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 128, 128);
@@ -412,7 +413,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       depthWrite: false,
     });
     const glowSprite = new Sprite(glowMat);
-    glowSprite.scale.set(120, 120, 1);
+    glowSprite.scale.set(240, 240, 1);
     glowSprite.position.set(0, 0, 1);
     sphereGroup.add(glowSprite);
 
@@ -434,7 +435,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         nx: Math.sin(phi) * Math.cos(theta),
         ny: Math.sin(phi) * Math.sin(theta),
         nz: Math.cos(phi),
-        length: 80 + Math.random() * 60,
+        length: 120 + Math.random() * 160,
       });
     }
 
@@ -443,17 +444,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       for (let p = 0; p < PARTICLES_PER_TENDRIL; p++) {
         const idx = t * PARTICLES_PER_TENDRIL + p;
         const progress = p / PARTICLES_PER_TENDRIL;
-        const dist = OUTER_RADIUS + progress * base.length;
-
-        const noiseScale = 0.05;
-        const dx = simplex3(base.nx * dist * noiseScale, base.ny * dist * noiseScale + 100, base.nz * dist * noiseScale) * 30 * progress;
-        const dy = simplex3(base.nx * dist * noiseScale + 200, base.ny * dist * noiseScale, base.nz * dist * noiseScale) * 30 * progress;
-        const dz = simplex3(base.nx * dist * noiseScale, base.ny * dist * noiseScale + 300, base.nz * dist * noiseScale) * 30 * progress;
-
-        tendrilPositions[idx * 3] = base.nx * dist + dx;
-        tendrilPositions[idx * 3 + 1] = base.ny * dist + dy;
-        tendrilPositions[idx * 3 + 2] = base.nz * dist + dz;
-
         const fade = 1 - progress;
         tendrilColors[idx * 3] = colPaleBW[0] * fade;
         tendrilColors[idx * 3 + 1] = colPaleBW[1] * fade;
@@ -583,7 +573,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       time += 0.016;
 
       // ── Breathing ──────────────────────────────────────────────────────────
-      const breathe = Math.sin(time * 0.4) * 0.035 + 1.0;
+      const breathe = Math.sin(time * 0.35) * 0.055 + 1.0;
       outerMat.uniforms.breathe.value = breathe;
       innerMat.uniforms.breathe.value = breathe;
       tendrilMat.uniforms.breathe.value = breathe;
@@ -598,7 +588,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       coreBrightness += (coreBrightnessTarget - coreBrightness) * brightnessLerp;
       innerMat.uniforms.uCoreBrightness.value = coreBrightness;
       // Pulse sprite scale with brightness
-      const spriteScale = 120 * (0.5 + 0.5 * coreBrightness);
+      const spriteScale = 240 * (0.6 + 0.4 * coreBrightness);
       glowSprite.scale.set(spriteScale, spriteScale, 1);
 
       // ── Part D: Global dim (search overlay) ────────────────────────────────
@@ -673,6 +663,26 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       (streamGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
       (streamGeo.getAttribute("aStreamColor") as BufferAttribute).needsUpdate = true;
       (streamGeo.getAttribute("aStreamAlpha") as BufferAttribute).needsUpdate = true;
+
+      // ── Tendril animation (writhing) ───────────────────────────────────────
+      const tPos = tendrilGeo.getAttribute("position").array as Float32Array;
+      for (let t = 0; t < TENDRIL_COUNT; t++) {
+        const base = tendrilBasePoints[t];
+        for (let p = 0; p < PARTICLES_PER_TENDRIL; p++) {
+          const idx = t * PARTICLES_PER_TENDRIL + p;
+          const progress = p / PARTICLES_PER_TENDRIL;
+          const dist = OUTER_RADIUS + progress * base.length;
+          const warp = time * 0.8 + t * 1.3;
+          const ns = 0.04;
+          const dx = simplex3(base.nx * dist * ns + warp, base.ny * dist * ns + 100, base.nz * dist * ns) * 45 * progress;
+          const dy = simplex3(base.nx * dist * ns + 200, base.ny * dist * ns + warp, base.nz * dist * ns) * 45 * progress;
+          const dz = simplex3(base.nx * dist * ns, base.ny * dist * ns + 300, base.nz * dist * ns + warp) * 45 * progress;
+          tPos[idx * 3]     = base.nx * dist + dx;
+          tPos[idx * 3 + 1] = base.ny * dist + dy;
+          tPos[idx * 3 + 2] = base.nz * dist + dz;
+        }
+      }
+      (tendrilGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
 
       composer.render();
       animFrameRef.current = window.requestAnimationFrame(animate);
