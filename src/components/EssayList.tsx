@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useZoomNavigate } from "@/components/TransitionLayer";
 
 interface EssayItem {
   slug: string;
@@ -16,7 +16,7 @@ interface EssayListProps {
 }
 
 export default function EssayList({ essays }: EssayListProps) {
-  const router = useRouter();
+  const zoomTo = useZoomNavigate();
 
   return (
     <div className="listing-items">
@@ -25,7 +25,7 @@ export default function EssayList({ essays }: EssayListProps) {
         <div
           key={essay.slug}
           className="listing-item"
-          onClick={() => router.push(`/essays/${essay.slug}`)}
+          onClick={(e) => zoomTo(`/essays/${essay.slug}`, e)}
         >
           <div className="listing-title-row">
             <span className={`listing-dot listing-dot-${essay.status}`} />

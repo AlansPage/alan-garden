@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { TransitionProvider } from "@/components/TransitionLayer";
 
 export const metadata: Metadata = {
   title: "ALAN_GARDEN",
@@ -14,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="garden-body">
-        {children}
+        <TransitionProvider>{children}</TransitionProvider>
       </body>
     </html>
   );

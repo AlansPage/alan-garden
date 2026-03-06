@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Fuse from "fuse.js";
 import type { VaultStats } from "@/lib/vault";
+import { useZoomNavigate } from "@/components/TransitionLayer";
 
 type ContentType = "note" | "essay" | "project";
 
@@ -23,6 +24,7 @@ interface HomeShellProps {
 
 export default function HomeShell({ stats, items }: HomeShellProps) {
   const router = useRouter();
+  const zoomTo = useZoomNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -337,7 +339,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
                       : "search-result"
                   }
                   onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => {
+                  onClick={(e) => {
                     const base =
                       item.type === "essay"
                         ? "/essays"
@@ -345,7 +347,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
                         ? "/projects"
                         : "/notes";
                     closeOverlay();
-                    router.push(`${base}/${item.slug}`);
+                    zoomTo(`${base}/${item.slug}`, e);
                   }}
                 >
                   <div className="search-result-header">

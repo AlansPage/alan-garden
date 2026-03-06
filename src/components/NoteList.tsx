@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useZoomNavigate } from "@/components/TransitionLayer";
 
 interface NoteItem {
   slug: string;
@@ -16,7 +16,7 @@ interface NoteListProps {
 }
 
 export default function NoteList({ notes }: NoteListProps) {
-  const router = useRouter();
+  const zoomTo = useZoomNavigate();
 
   return (
     <div className="listing-items">
@@ -25,7 +25,7 @@ export default function NoteList({ notes }: NoteListProps) {
         <div
           key={note.slug}
           className="listing-item"
-          onClick={() => router.push(`/notes/${note.slug}`)}
+          onClick={(e) => zoomTo(`/notes/${note.slug}`, e)}
         >
           <div className="listing-title-row">
             <span className={`listing-dot listing-dot-${note.status}`} />
