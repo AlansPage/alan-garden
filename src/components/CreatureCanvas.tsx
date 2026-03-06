@@ -33,9 +33,9 @@ function lerp(a: number, b: number, t: number): number {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const ORGAN_COUNT = 5;
-const PARTICLES_PER_ORGAN = 2500;
+const PARTICLES_PER_ORGAN = 800;
 const STREAM_COUNT = 5;
-const PARTICLES_PER_STREAM = 150;
+const PARTICLES_PER_STREAM = 60;
 const PSEUDOPOD_COUNT = 1800;
 const FEED_PARTICLE_MAX = 1000;
 
@@ -86,7 +86,7 @@ const ORGAN_VERT = /* glsl */ `
   void main() {
     vColor = color;
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = size * (300.0 / -mvPosition.z);
+    gl_PointSize = size * (150.0 / -mvPosition.z);
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -98,7 +98,7 @@ const ORGAN_FRAG = /* glsl */ `
     if (d > 0.5) discard;
     float alpha = 1.0 - (d * 2.0);
     alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(vColor, alpha * 0.88);
+    gl_FragColor = vec4(vColor, alpha * 0.35);
   }
 `;
 
@@ -111,7 +111,7 @@ const CORE_FRAG = /* glsl */ `
     if (d > 0.5) discard;
     float alpha = 1.0 - (d * 2.0);
     alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(vColor * brightness, alpha * 0.88);
+    gl_FragColor = vec4(vColor * brightness, alpha * 0.35);
   }
 `;
 
@@ -133,7 +133,7 @@ const STREAM_VERT = /* glsl */ `
   attribute float size;
   void main() {
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = size * (300.0 / -mvPosition.z);
+    gl_PointSize = size * (150.0 / -mvPosition.z);
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -313,6 +313,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio || 1);
     renderer.setSize(width, height);
+    renderer.setClearColor(0x000000, 0); // alpha 0 = transparent, CSS black shows through
 
     const scene = new Scene();
 
@@ -349,8 +350,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     for (let o = 0; o < ORGAN_COUNT; o++) {
       const [cx, cy] = organCenters[o];
-      const sigmaX = 55 + Math.random() * 20;
-      const sigmaY = 45 + Math.random() * 20;
+      const sigmaX = 35 + Math.random() * 10;
+      const sigmaY = 28 + Math.random() * 10;
       const [coreColor, edgeColor] = ORGAN_COLORS[o];
 
       const positions = new Float32Array(PARTICLES_PER_ORGAN * 3);
@@ -375,7 +376,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
           coreColor[1] + (edgeColor[1] - coreColor[1]) * life;
         colors[i * 3 + 2] =
           coreColor[2] + (edgeColor[2] - coreColor[2]) * life;
-        sizes[i] = 1.2 + Math.random() * 0.6;
+        sizes[i] = 0.6 + Math.random() * 0.4;
       }
 
       const geo = new BufferGeometry();
@@ -406,7 +407,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     for (let s = 0; s < STREAM_COUNT; s++) {
       const positions = new Float32Array(PARTICLES_PER_STREAM * 3);
-      const sizes = new Float32Array(PARTICLES_PER_STREAM).fill(0.9);
+      const sizes = new Float32Array(PARTICLES_PER_STREAM).fill(0.7);
 
       const geo = new BufferGeometry();
       geo.setAttribute("position", new BufferAttribute(positions, 3));
