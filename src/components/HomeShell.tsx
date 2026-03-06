@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Fuse from "fuse.js";
 import type { VaultStats } from "@/lib/vault";
 
@@ -159,13 +160,21 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
         </button>
 
         <nav className="home-nav">
-          <span className="home-nav-item">ESSAYS</span>
+          <Link href="/essays" className="home-nav-item">
+            ESSAYS
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">NOTES</span>
+          <Link href="/notes" className="home-nav-item">
+            NOTES
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">GRAPH</span>
+          <Link href="/graph" className="home-nav-item">
+            GRAPH
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">NOW</span>
+          <Link href="/now" className="home-nav-item">
+            NOW
+          </Link>
         </nav>
 
         <div className="home-status">
@@ -184,6 +193,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
           <div
             className="search-modal"
             onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <input
               ref={inputRef}

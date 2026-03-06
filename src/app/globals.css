@@ -136,7 +136,14 @@ canvas.creature-canvas {
 }
 
 .home-nav-item {
-  cursor: default;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.home-nav-item:hover {
+  color: #e8ff00;
 }
 
 .home-nav-sep {
