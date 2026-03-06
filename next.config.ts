@@ -1,11 +1,3 @@
 import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
-  experimental: {
-    turbopackUseSystemTlsCerts: true,
-  },
-};
-
+const nextConfig: NextConfig = {};
 export default nextConfig;

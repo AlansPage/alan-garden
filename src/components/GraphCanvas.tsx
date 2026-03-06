@@ -8,13 +8,13 @@ import {
   BufferGeometry,
   Color,
   Group,
-  Line,
-  LineBasicMaterial,
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
+  Points,
   Raycaster,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
   Vector2,
   Vector3,
@@ -47,18 +47,13 @@ const STATUS_COLORS: Record<string, string> = {
 
 function nodeColor(status: string, type: string, tags: string[]): Color {
   if (type === "essay") return new Color("#E8FF00");
-
-  // If note has tags, hash the first tag into the palette
   if (tags.length > 0) {
     const tag = tags[0];
     const hash = tag.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
     return new Color(TAG_COLORS[hash % TAG_COLORS.length]);
   }
-
   return new Color(STATUS_COLORS[status] ?? "#5B6FD4");
 }
-
-// ── Node sizing by backlink count ─────────────────────────────────────────────
 
 function nodeRadius(backlinkCount: number): number {
   if (backlinkCount === 0) return 3;
@@ -72,6 +67,37 @@ function nodeRadius(backlinkCount: number): number {
 
 const CAM_Z = 900;
 const FOV_DEG = 45;
+const PARTICLES_PER_EDGE = 60;
+
+// ── Particle shaders ──────────────────────────────────────────────────────────
+
+const PARTICLE_VERT = `
+  attribute float aSize;
+  attribute float aAlpha;
+  attribute vec3 aColor;
+  varying float vAlpha;
+  varying vec3 vColor;
+
+  void main() {
+    vAlpha = aAlpha;
+    vColor = aColor;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = aSize;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const PARTICLE_FRAG = `
+  varying float vAlpha;
+  varying vec3 vColor;
+
+  void main() {
+    float d = length(gl_PointCoord - vec2(0.5)) * 2.0;
+    if (d > 1.0) discard;
+    float fade = 1.0 - smoothstep(0.4, 1.0, d);
+    gl_FragColor = vec4(vColor * vAlpha * fade, 1.0);
+  }
+`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,8 +111,7 @@ interface GraphCanvasProps {
 interface NodeVisual {
   slug: string;
   title: string;
-  mesh: Mesh;
-  haloMesh: Mesh;
+  mesh: Mesh; // invisible sphere, raycasting only
   baseColor: Color;
   position: Vector3;
   previous: Vector3;
@@ -95,16 +120,11 @@ interface NodeVisual {
   idx: number;
   status: string;
   type: string;
-  haloTarget: number;
-  haloCurrent: number;
-  scaleTarget: number;
-  scaleCurrent: number;
 }
 
-interface EdgeVisual {
+interface EdgeInfo {
   sourceIndex: number;
   targetIndex: number;
-  line: Line;
   sharedConnections: number;
 }
 
@@ -146,7 +166,7 @@ export default function GraphCanvas({
     const rootGroup = new Group();
     scene.add(rootGroup);
 
-    // ── Label overlay (canvas 2D for hover text) ──────────────────────────────
+    // ── Label overlay (canvas 2D, hover-only) ─────────────────────────────────
 
     const labelCanvas = document.createElement("canvas");
     labelCanvas.style.cssText =
@@ -161,21 +181,29 @@ export default function GraphCanvas({
     }
     resizeLabelCanvas();
 
+    // ── Particle shader material (shared) ─────────────────────────────────────
+
+    const particleMat = new ShaderMaterial({
+      vertexShader: PARTICLE_VERT,
+      fragmentShader: PARTICLE_FRAG,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    });
+
     // ── Nodes ─────────────────────────────────────────────────────────────────
 
     const nodes: NodeVisual[] = [];
-    const edges: EdgeVisual[] = [];
+    const edgeInfos: EdgeInfo[] = [];
     const slugToIdx = new Map<string, number>();
     const sphereGeo = new SphereGeometry(1, 12, 12);
 
-    // Count connections per node for edge opacity
     const connectionCount = new Map<string, number>();
     for (const e of graph.edges) {
       connectionCount.set(e.source, (connectionCount.get(e.source) ?? 0) + 1);
       connectionCount.set(e.target, (connectionCount.get(e.target) ?? 0) + 1);
     }
 
-    // Initial positions: spread out by type/status
     const initPos = (type: string, status: string, i: number): Vector3 => {
       if (type === "essay") {
         return new Vector3(gauss(80), gauss(80), gauss(15));
@@ -186,7 +214,6 @@ export default function GraphCanvas({
       if (status === "budding") {
         return new Vector3(gauss(300), gauss(300), gauss(20));
       }
-      // Seedling — outer ring
       const angle =
         (i / Math.max(1, graph.nodes.length)) * Math.PI * 2 +
         (Math.random() - 0.5) * 0.8;
@@ -201,39 +228,23 @@ export default function GraphCanvas({
     graph.nodes.forEach((node, i) => {
       const r = nodeRadius(node.backlinkCount);
       const color = nodeColor(node.status, node.type, node.tags);
-      const baseOpacity = node.type === "essay" ? 1.0 : 0.85;
 
+      // Invisible sphere — raycasting only, never renders
       const mat = new MeshBasicMaterial({
-        color,
         transparent: true,
-        opacity: baseOpacity,
-      });
-      const mesh = new Mesh(sphereGeo, mat);
-      mesh.userData.baseOpacity = baseOpacity;
-
-      // Halo: 2.5× radius, same color, 6% opacity
-      const haloMat = new MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.06,
+        opacity: 0,
         depthWrite: false,
       });
-      const haloMesh = new Mesh(sphereGeo, haloMat);
-
+      const mesh = new Mesh(sphereGeo, mat);
       const pos = initPos(node.type, node.status, i);
       mesh.position.copy(pos);
       mesh.scale.setScalar(r);
-      haloMesh.position.copy(pos);
-      haloMesh.scale.setScalar(r * 2.5);
-
       rootGroup.add(mesh);
-      rootGroup.add(haloMesh);
 
       nodes.push({
         slug: node.slug,
         title: node.title,
         mesh,
-        haloMesh,
         baseColor: color.clone(),
         position: pos.clone(),
         previous: pos.clone(),
@@ -242,44 +253,87 @@ export default function GraphCanvas({
         idx: i,
         status: node.status,
         type: node.type,
-        haloTarget: r * 2.5,
-        haloCurrent: r * 2.5,
-        scaleTarget: r,
-        scaleCurrent: r,
       });
       slugToIdx.set(node.slug, i);
     });
 
-    // ── Edges ─────────────────────────────────────────────────────────────────
+    // ── Edge info ─────────────────────────────────────────────────────────────
 
     graph.edges.forEach((edge) => {
       const si = slugToIdx.get(edge.source);
       const ti = slugToIdx.get(edge.target);
       if (si === undefined || ti === undefined || si === ti) return;
 
-      // Count shared connections for opacity
       const srcConns = connectionCount.get(edge.source) ?? 0;
       const tgtConns = connectionCount.get(edge.target) ?? 0;
-      const shared = Math.min(srcConns, tgtConns);
-
-      const positions = new Float32Array(2 * 3);
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(positions, 3));
-
-      const opacity = shared >= 3 ? 0.15 : 0.05;
-      const mat = new LineBasicMaterial({
-        color: new Color("#ffffff"),
-        transparent: true,
-        opacity,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        linewidth: 0.5,
+      edgeInfos.push({
+        sourceIndex: si,
+        targetIndex: ti,
+        sharedConnections: Math.min(srcConns, tgtConns),
       });
-
-      const line = new Line(geo, mat);
-      rootGroup.add(line);
-      edges.push({ sourceIndex: si, targetIndex: ti, line, sharedConnections: shared });
     });
+
+    // ── Edge particle system (single BufferGeometry for all edges) ────────────
+
+    const edgeParticleCount = edgeInfos.length * PARTICLES_PER_EDGE;
+    const edgePosArr = new Float32Array(edgeParticleCount * 3);
+    const edgeColArr = new Float32Array(edgeParticleCount * 3);
+    const edgeAlphaArr = new Float32Array(edgeParticleCount);
+    const edgeSizeArr = new Float32Array(edgeParticleCount).fill(1.5);
+
+    const edgeGeo = new BufferGeometry();
+    edgeGeo.setAttribute("position", new BufferAttribute(edgePosArr, 3));
+    edgeGeo.setAttribute("aColor", new BufferAttribute(edgeColArr, 3));
+    edgeGeo.setAttribute("aAlpha", new BufferAttribute(edgeAlphaArr, 1));
+    edgeGeo.setAttribute("aSize", new BufferAttribute(edgeSizeArr, 1));
+
+    const edgePoints = new Points(edgeGeo, particleMat);
+    rootGroup.add(edgePoints);
+
+    // Per-edge highlight factor: 0.25 base, 1.0 when connected to hovered node
+    const edgeHighlight = new Float32Array(edgeInfos.length).fill(0.25);
+
+    // Per-edge wobble seeds (pre-compute once, consistent per session)
+    const edgeWobbleX = new Float32Array(edgeInfos.length);
+    const edgeWobbleY = new Float32Array(edgeInfos.length);
+    for (let ei = 0; ei < edgeInfos.length; ei++) {
+      edgeWobbleX[ei] = Math.sin(ei * 7.3 + 1.4) * 8;
+      edgeWobbleY[ei] = Math.cos(ei * 3.1 + 2.7) * 8;
+    }
+
+    // ── Node particle system ──────────────────────────────────────────────────
+
+    const nodeParticleCount = nodes.length * 2; // core + halo per node
+    const nodePosArr = new Float32Array(nodeParticleCount * 3);
+    const nodeColArr = new Float32Array(nodeParticleCount * 3);
+    const nodeAlphaArr = new Float32Array(nodeParticleCount);
+    const nodeSizeArr = new Float32Array(nodeParticleCount);
+
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      const hi = nodes.length + i;
+      // Core
+      nodeSizeArr[i] = n.radius * 2.5;
+      nodeAlphaArr[i] = 0.9;
+      nodeColArr[i * 3 + 0] = n.baseColor.r;
+      nodeColArr[i * 3 + 1] = n.baseColor.g;
+      nodeColArr[i * 3 + 2] = n.baseColor.b;
+      // Halo
+      nodeSizeArr[hi] = Math.min(n.radius * 5.0, 60);
+      nodeAlphaArr[hi] = 0.25;
+      nodeColArr[hi * 3 + 0] = n.baseColor.r;
+      nodeColArr[hi * 3 + 1] = n.baseColor.g;
+      nodeColArr[hi * 3 + 2] = n.baseColor.b;
+    }
+
+    const nodeGeo = new BufferGeometry();
+    nodeGeo.setAttribute("position", new BufferAttribute(nodePosArr, 3));
+    nodeGeo.setAttribute("aColor", new BufferAttribute(nodeColArr, 3));
+    nodeGeo.setAttribute("aAlpha", new BufferAttribute(nodeAlphaArr, 1));
+    nodeGeo.setAttribute("aSize", new BufferAttribute(nodeSizeArr, 1));
+
+    const nodePoints = new Points(nodeGeo, particleMat);
+    rootGroup.add(nodePoints);
 
     // ── Runtime state ─────────────────────────────────────────────────────────
 
@@ -289,6 +343,7 @@ export default function GraphCanvas({
 
     let hoveredIdx: number | null = null;
     let flash: { idx: number; frame: number } | null = null;
+    let time = 0;
 
     // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -313,7 +368,6 @@ export default function GraphCanvas({
       if (hits.length > 0) {
         const idx = nodes.findIndex((n) => n.mesh === hits[0].object);
         if (idx >= 0) {
-          (nodes[idx].mesh.material as MeshBasicMaterial).color.set(0xffffff);
           flash = { idx, frame: 0 };
           const slug = nodes[idx].slug;
           setTimeout(() => onSelectRef.current(slug), 300);
@@ -326,12 +380,12 @@ export default function GraphCanvas({
     input.addEventListener("pointermove", onPointerMove);
     input.addEventListener("click", onClick);
 
-    // ── Force simulation (FIX 4: tighter clusters) ────────────────────────────
+    // ── Force simulation ──────────────────────────────────────────────────────
 
     const simulate = () => {
       for (const n of nodes) n.acceleration.set(0, 0, 0);
 
-      // Repulsion: 40% stronger than original (1800 * 1.4 = 2520)
+      // Repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i],
@@ -344,8 +398,8 @@ export default function GraphCanvas({
         }
       }
 
-      // Link attraction: 25% shorter rest length (220 * 0.75 = 165)
-      for (const e of edges) {
+      // Link attraction
+      for (const e of edgeInfos) {
         const a = nodes[e.sourceIndex],
           b = nodes[e.targetIndex];
         const delta = new Vector3().subVectors(b.position, a.position);
@@ -360,7 +414,7 @@ export default function GraphCanvas({
         n.acceleration.add(n.position.clone().multiplyScalar(-0.002));
       }
 
-      // Verlet integration
+      // Verlet integration + slow organic drift
       const dt2 = 0.016 * 0.016;
       for (const n of nodes) {
         const cur = n.position.clone();
@@ -368,21 +422,105 @@ export default function GraphCanvas({
         n.position.copy(
           cur.clone().add(vel).add(n.acceleration.clone().multiplyScalar(dt2))
         );
+        // Slow per-node sine drift — barely perceptible, makes graph feel alive
+        n.position.x += Math.sin(time * 0.3 + n.idx * 1.7) * 0.08;
+        n.position.y += Math.cos(time * 0.25 + n.idx * 2.3) * 0.08;
         n.previous.copy(cur);
+        // Keep invisible raycasting sphere in sync
         n.mesh.position.copy(n.position);
-        n.haloMesh.position.copy(n.position);
       }
     };
 
-    const updateEdges = () => {
-      for (const e of edges) {
-        const a = nodes[e.sourceIndex].position;
-        const b = nodes[e.targetIndex].position;
-        const attr = e.line.geometry.getAttribute("position") as BufferAttribute;
-        attr.setXYZ(0, a.x, a.y, a.z);
-        attr.setXYZ(1, b.x, b.y, b.z);
-        attr.needsUpdate = true;
+    // ── Update all particle buffers (called every frame) ──────────────────────
+
+    const updateParticles = () => {
+      // ── Edge particles ────────────────────────────────────────────────────
+      for (let ei = 0; ei < edgeInfos.length; ei++) {
+        const e = edgeInfos[ei];
+        const src = nodes[e.sourceIndex].position;
+        const tgt = nodes[e.targetIndex].position;
+        const srcCol = nodes[e.sourceIndex].baseColor;
+        const tgtCol = nodes[e.targetIndex].baseColor;
+        const wx = edgeWobbleX[ei];
+        const wy = edgeWobbleY[ei];
+        const baseAlpha = edgeHighlight[ei];
+
+        for (let p = 0; p < PARTICLES_PER_EDGE; p++) {
+          const t = p / (PARTICLES_PER_EDGE - 1);
+          const pidx = ei * PARTICLES_PER_EDGE + p;
+          const b3 = pidx * 3;
+          const wobble = Math.sin(t * Math.PI);
+
+          // Position: lerp + perpendicular organic wobble
+          edgePosArr[b3 + 0] = src.x + (tgt.x - src.x) * t + wx * wobble;
+          edgePosArr[b3 + 1] = src.y + (tgt.y - src.y) * t + wy * wobble;
+          edgePosArr[b3 + 2] = src.z + (tgt.z - src.z) * t;
+
+          // Color: lerp source → target
+          edgeColArr[b3 + 0] = srcCol.r + (tgtCol.r - srcCol.r) * t;
+          edgeColArr[b3 + 1] = srcCol.g + (tgtCol.g - srcCol.g) * t;
+          edgeColArr[b3 + 2] = srcCol.b + (tgtCol.b - srcCol.b) * t;
+
+          // Alpha: fade at both ends, bright in middle
+          edgeAlphaArr[pidx] = baseAlpha * wobble;
+        }
       }
+
+      (edgeGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
+      (edgeGeo.getAttribute("aColor") as BufferAttribute).needsUpdate = true;
+      (edgeGeo.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
+
+      // ── Node particles ────────────────────────────────────────────────────
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const b3 = i * 3;
+        const hi = nodes.length + i;
+        const hb3 = hi * 3;
+
+        // Position (core + halo follow node)
+        nodePosArr[b3 + 0] = n.position.x;
+        nodePosArr[b3 + 1] = n.position.y;
+        nodePosArr[b3 + 2] = n.position.z;
+        nodePosArr[hb3 + 0] = n.position.x;
+        nodePosArr[hb3 + 1] = n.position.y;
+        nodePosArr[hb3 + 2] = n.position.z;
+
+        // Size + alpha per state
+        if (flash && flash.idx === i) {
+          const flashFrac = Math.min(1, flash.frame / 24);
+          const boost = 1 - flashFrac;
+          nodeAlphaArr[i] = 0.9 + boost * 0.5;
+          nodeSizeArr[i] = n.radius * 2.5 * (1 + boost * 0.6);
+          // Flash color: white → base
+          const fr = 1.0 - flashFrac + n.baseColor.r * flashFrac;
+          const fg = 1.0 - flashFrac + n.baseColor.g * flashFrac;
+          const fb = 1.0 - flashFrac + n.baseColor.b * flashFrac;
+          nodeColArr[b3 + 0] = fr;
+          nodeColArr[b3 + 1] = fg;
+          nodeColArr[b3 + 2] = fb;
+        } else if (hoveredIdx === i) {
+          nodeAlphaArr[i] = 1.0;
+          nodeSizeArr[i] = n.radius * 2.5 * 1.4;
+          nodeAlphaArr[hi] = 0.4;
+          nodeSizeArr[hi] = Math.min(n.radius * 7.0, 80);
+          nodeColArr[b3 + 0] = n.baseColor.r;
+          nodeColArr[b3 + 1] = n.baseColor.g;
+          nodeColArr[b3 + 2] = n.baseColor.b;
+        } else {
+          nodeAlphaArr[i] = 0.9;
+          nodeSizeArr[i] = n.radius * 2.5;
+          nodeAlphaArr[hi] = 0.25;
+          nodeSizeArr[hi] = Math.min(n.radius * 5.0, 60);
+          nodeColArr[b3 + 0] = n.baseColor.r;
+          nodeColArr[b3 + 1] = n.baseColor.g;
+          nodeColArr[b3 + 2] = n.baseColor.b;
+        }
+      }
+
+      (nodeGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
+      (nodeGeo.getAttribute("aColor") as BufferAttribute).needsUpdate = true;
+      (nodeGeo.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
+      (nodeGeo.getAttribute("aSize") as BufferAttribute).needsUpdate = true;
     };
 
     // ── Project world pos to screen ───────────────────────────────────────────
@@ -400,10 +538,11 @@ export default function GraphCanvas({
     let animId: number;
 
     const animate = () => {
-      simulate();
-      updateEdges();
+      time += 0.016;
 
-      // ── Hover detection ───────────────────────────────────────────────────
+      simulate();
+
+      // Hover detection
       raycaster.setFromCamera(mouse, camera);
       const hits = raycaster.intersectObjects(nodeMeshes, false);
       const newHovered =
@@ -412,71 +551,40 @@ export default function GraphCanvas({
           : null;
 
       if (newHovered !== hoveredIdx) {
-        // Restore previous
-        if (hoveredIdx !== null) {
-          nodes[hoveredIdx].haloTarget = nodes[hoveredIdx].radius * 2.5;
-          nodes[hoveredIdx].scaleTarget = nodes[hoveredIdx].radius;
-          const m = nodes[hoveredIdx].mesh.material as MeshBasicMaterial;
-          m.opacity = nodes[hoveredIdx].mesh.userData.baseOpacity as number;
-          m.needsUpdate = true;
-        }
-
         hoveredIdx = newHovered;
-
-        if (hoveredIdx !== null) {
-          nodes[hoveredIdx].haloTarget = nodes[hoveredIdx].radius * 4.0;
-          nodes[hoveredIdx].scaleTarget = nodes[hoveredIdx].radius * 1.4;
-          const m = nodes[hoveredIdx].mesh.material as MeshBasicMaterial;
-          m.opacity = 1.0;
-          m.needsUpdate = true;
-        }
-
-        // Edge highlight on hover
-        for (const e of edges) {
-          const m = e.line.material as LineBasicMaterial;
+        // Update edge highlight factors
+        for (let ei = 0; ei < edgeInfos.length; ei++) {
+          const e = edgeInfos[ei];
           if (
             hoveredIdx !== null &&
             (e.sourceIndex === hoveredIdx || e.targetIndex === hoveredIdx)
           ) {
-            m.opacity = 0.4;
+            edgeHighlight[ei] = 1.0;
           } else {
-            m.opacity = e.sharedConnections >= 3 ? 0.15 : 0.05;
+            edgeHighlight[ei] = e.sharedConnections >= 3 ? 0.3 : 0.18;
           }
-          m.needsUpdate = true;
         }
       }
 
-      // ── Scale + halo lerp ──────────────────────────────────────────────────
-      for (const n of nodes) {
-        n.haloCurrent += (n.haloTarget - n.haloCurrent) * 0.1;
-        n.haloMesh.scale.setScalar(n.haloCurrent);
-        n.scaleCurrent += (n.scaleTarget - n.scaleCurrent) * 0.2;
-        n.mesh.scale.setScalar(n.scaleCurrent);
-      }
-
-      // ── Click flash ────────────────────────────────────────────────────────
+      // Advance flash
       if (flash) {
         flash.frame++;
-        const n = nodes[flash.idx];
-        const m = n.mesh.material as MeshBasicMaterial;
-        m.color.lerpColors(
-          new Color(0xffffff),
-          n.baseColor,
-          Math.min(1, flash.frame / 24)
-        );
-        m.needsUpdate = true;
         if (flash.frame >= 24) flash = null;
       }
 
-      // ── Label rendering (hover only) ───────────────────────────────────────
+      updateParticles();
+
+      // Label (hover-only, canvas-2D)
       labelCtx.clearRect(0, 0, width, height);
       if (hoveredIdx !== null) {
         const n = nodes[hoveredIdx];
         const [sx, sy] = projectToScreen(n.position);
-        const screenR = (n.radius * 1.4 * height) / (2 * CAM_Z * Math.tan(((FOV_DEG * Math.PI) / 180) / 2));
+        const screenR =
+          (n.radius * 1.4 * height) /
+          (2 * CAM_Z * Math.tan(((FOV_DEG * Math.PI) / 180) / 2));
         labelCtx.font = '10px "IBM Plex Mono", monospace';
-        labelCtx.fillStyle = "rgba(255,255,255,0.85)";
-        labelCtx.fillText(n.title, sx + screenR + 6, sy + 3);
+        labelCtx.fillStyle = "rgba(255,255,255,0.75)";
+        labelCtx.fillText(n.title, sx + screenR + 8, sy + 3);
       }
 
       renderer.render(scene, camera);
@@ -507,6 +615,9 @@ export default function GraphCanvas({
       input.removeEventListener("pointermove", onPointerMove);
       input.removeEventListener("click", onClick);
       sphereGeo.dispose();
+      edgeGeo.dispose();
+      nodeGeo.dispose();
+      particleMat.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
