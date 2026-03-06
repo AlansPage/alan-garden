@@ -33,6 +33,7 @@ export interface GraphNode {
   status: NoteStatus;
   backlinkCount: number;
   excerpt: string;
+  tags: string[];
 }
 
 export interface GraphEdge {
@@ -189,6 +190,7 @@ export function getGraphData(): GraphData {
     status: note.frontmatter.status,
     backlinkCount: backlinkCount.get(note.slug) ?? 0,
     excerpt: note.frontmatter.excerpt,
+    tags: note.frontmatter.tags,
   }));
 
   const edgeSet = new Set<string>();

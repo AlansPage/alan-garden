@@ -515,16 +515,16 @@ canvas.creature-canvas {
 /* Graph page — return link */
 .return-to-void {
   position: fixed;
-  bottom: 24px;
-  left: 32px;
+  bottom: 28px;
+  left: 28px;
   z-index: 20;
   font-size: 10px;
   font-family: var(--font-plex-mono), "IBM Plex Mono", monospace;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.25);
   text-decoration: none;
-  transition: color 0.2s ease;
+  transition: color 0.15s ease;
 }
 
 .return-to-void:hover {
