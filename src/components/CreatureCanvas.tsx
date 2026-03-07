@@ -82,16 +82,18 @@ function simplex3(xin: number, yin: number, zin: number): number {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const OUTER_COUNT = 40000;     // dense packed shell
-const INNER_COUNT = 22000;     // rich inner volume
-const TENDRIL_COUNT = 7;
-const PARTICLES_PER_TENDRIL = 600;
-const OUTER_RADIUS = 260;
+const OUTER_COUNT  = 65000;  // dense blue crystalline shell
+const MOAT_COUNT   = 28000;  // attempts for sparse spiked dark moat
+const CORE_COUNT   = 20000;  // hot red/orange core
 const STREAM_COUNT = 600;
+
+const OUTER_RADIUS  = 260;   // nominal sphere radius (world units)
+const SHELL_INNER   = 168;   // inner edge of blue outer shell
+const MOAT_INNER    = 82;    // inner edge of dark moat / outer edge of core
+const SPIKE_COUNT   = 9;     // number of dark radial void spikes
 
 // ── Shaders ───────────────────────────────────────────────────────────────────
 
-// Sphere layers — breathe + global dim + core brightness
 const SPHERE_VERT = /* glsl */ `
   uniform float breathe;
   uniform float uGlobalAlpha;
@@ -117,16 +119,14 @@ const SPHERE_FRAG = /* glsl */ `
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
     if (d > 0.5) discard;
-    // Hard bright center, tight falloff — crystal not dust
     float alpha = 1.0 - smoothstep(0.0, 0.5, d);
-    alpha = pow(alpha, 2.5);          // tight dim point, not a fat disc
-    float core = max(0.0, 1.0 - d * 8.0);
-    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.1);
+    alpha = pow(alpha, 2.2);
+    float core = max(0.0, 1.0 - d * 7.0);
+    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.08);
     gl_FragColor = vec4(lit, alpha * vAlpha);
   }
 `;
 
-// Stream particles — age-based color, no sphere breathe
 const STREAM_VERT = /* glsl */ `
   attribute float size;
   attribute vec3 aStreamColor;
@@ -193,8 +193,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  // Bridge: dispatch window events so the Three.js loop (inside useEffect)
-  // can react without cross-closure coupling.
   useImperativeHandle(ref, () => ({
     triggerFeed(_x, _y, _noteData) {
       window.dispatchEvent(new CustomEvent("creature-start-feeding"));
@@ -221,10 +219,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const scene = new Scene();
 
-    // ── Camera — orthographic, centered at origin ─────────────────────────────
-    // Sphere radius = 260. We want it to fill ~55% of viewport height.
-    // visibleHalfH is constant — only aspect changes on resize.
-    const visibleHalfH = OUTER_RADIUS / 0.55;
+    const visibleHalfH = OUTER_RADIUS / 0.52;
     let aspect = width / height;
     const camera = new OrthographicCamera(
       -visibleHalfH * aspect,
@@ -236,8 +231,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     );
     camera.position.z = 500;
 
-    // ── Screen → world coordinate conversion ─────────────────────────────────
-    // Used to convert char screen positions to Three.js world units.
     const screenToWorld = (sx: number, sy: number): [number, number] => [
       (sx / width - 0.5) * visibleHalfH * aspect * 2,
       -(sy / height - 0.5) * visibleHalfH * 2,
@@ -247,12 +240,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(
-      new Vector2(width, height),
-      0.45,
-      0.5,
-      0.5
-    );
+    const bloomPass = new UnrealBloomPass(new Vector2(width, height), 0.55, 0.4, 0.72);
     composer.addPass(bloomPass);
 
     // ── Sphere group ──────────────────────────────────────────────────────────
@@ -260,66 +248,105 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const sphereGroup = new Group();
     scene.add(sphereGroup);
 
-    // ── LAYER 1: Outer shell — 14000 particles on sphere surface with noise ──
+    // ── Color palette ─────────────────────────────────────────────────────────
+
+    const colDeepNavy  = hexToRgb("#0a1a55");   // darkest base
+    const colDeepBlue  = hexToRgb("#1144cc");   // deep electric blue
+    const colMidBlue   = hexToRgb("#3377ff");   // mid blue
+    const colBrightBlue = hexToRgb("#66aaff");  // bright blue
+    const colColdWhite = hexToRgb("#cce8ff");   // cold white-blue tip
+    const colSparkle   = hexToRgb("#ffffff");   // pure white sparkle
+
+    const colCoreWhite  = hexToRgb("#ffffff");  // dead center white
+    const colCoreYellow = hexToRgb("#ffdd44");  // hot yellow
+    const colCoreOrange = hexToRgb("#ff6600");  // burning orange
+    const colCoreRed    = hexToRgb("#dd1100");  // deep red
+    const colCoreDarkRed = hexToRgb("#880000"); // outer core edge
+
+    // ── LAYER 1: Outer blue crystalline shell ─────────────────────────────────
+    // Dense noisy sphere: r = OUTER_RADIUS ± 55 noise displacement.
+    // Only particles beyond SHELL_INNER make it through — creates the thick
+    // outer shell with naturally bumpy, irregular inner boundary.
 
     const outerPositions = new Float32Array(OUTER_COUNT * 3);
-    const outerColors = new Float32Array(OUTER_COUNT * 3);
-    const outerAlphas = new Float32Array(OUTER_COUNT);
-    const outerSizes = new Float32Array(OUTER_COUNT);
+    const outerColors    = new Float32Array(OUTER_COUNT * 3);
+    const outerAlphas    = new Float32Array(OUTER_COUNT);
+    const outerSizes     = new Float32Array(OUTER_COUNT);
 
-    const colPaleBW = hexToRgb("#ddeeff");     // colder white-blue
-    const colMedBlue = hexToRgb("#4488ff");    // electric mid blue
-    const colDeepBlue = hexToRgb("#1133bb");   // deep navy
-
-    for (let i = 0; i < OUTER_COUNT; i++) {
+    let outerPlaced = 0;
+    let outerAttempts = 0;
+    while (outerPlaced < OUTER_COUNT && outerAttempts < OUTER_COUNT * 3) {
+      outerAttempts++;
       const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      const phi   = Math.acos(2 * Math.random() - 1);
       const nx = Math.sin(phi) * Math.cos(theta);
       const ny = Math.sin(phi) * Math.sin(theta);
       const nz = Math.cos(phi);
 
-      const noiseVal = simplex3(nx * 3, ny * 3, nz * 3);
-      const r = OUTER_RADIUS + noiseVal * 45;
+      // Two octaves of noise for bumpy, organic shell edge
+      const n1 = simplex3(nx * 2.8, ny * 2.8, nz * 2.8);
+      const n2 = simplex3(nx * 6.0 + 17, ny * 6.0 + 31, nz * 6.0 + 53) * 0.4;
+      const noiseVal = n1 + n2; // -1.4 to 1.4
+      const r = OUTER_RADIUS + noiseVal * 50; // 190–330 range
 
-      outerPositions[i * 3] = nx * r;
+      if (r < SHELL_INNER) continue; // inside the shell inner boundary — skip
+
+      // t=0 at inner boundary, t=1 at outer tips
+      const t = Math.max(0, Math.min(1, (r - SHELL_INNER) / (OUTER_RADIUS + 50 - SHELL_INNER)));
+
+      const i = outerPlaced;
+      outerPositions[i * 3]     = nx * r;
       outerPositions[i * 3 + 1] = ny * r;
       outerPositions[i * 3 + 2] = nz * r;
 
+      // Color gradient: deep navy → deep blue → mid blue → bright blue → cold white
       let col: [number, number, number];
-      if (r > 275) {
-        col = colPaleBW;                              // tips: cold white
-      } else if (r > 240) {
-        col = lerpColor(colMedBlue, colPaleBW, (r - 240) / 35);
+      if (t > 0.85) {
+        // Outermost tips: cold white with slight blue
+        col = lerpColor(colColdWhite, colSparkle, (t - 0.85) / 0.15);
+      } else if (t > 0.65) {
+        col = lerpColor(colBrightBlue, colColdWhite, (t - 0.65) / 0.20);
+      } else if (t > 0.38) {
+        col = lerpColor(colMidBlue, colBrightBlue, (t - 0.38) / 0.27);
+      } else if (t > 0.15) {
+        col = lerpColor(colDeepBlue, colMidBlue, (t - 0.15) / 0.23);
       } else {
-        col = lerpColor(colDeepBlue, colMedBlue, Math.max(0, (r - 200) / 40));
+        col = lerpColor(colDeepNavy, colDeepBlue, t / 0.15);
       }
 
       outerColors[i * 3]     = col[0];
       outerColors[i * 3 + 1] = col[1];
       outerColors[i * 3 + 2] = col[2];
-      // Particles furthest from surface = biggest/brightest
-      // They are the "note particles" — distinct, countable
-      const t = Math.max(0, (r - (OUTER_RADIUS - 30)) / 75);
-      if (t > 0.6) {
-        // Outermost spike tips — large, countable, blue stars
-        outerAlphas[i] = 0.28 + Math.random() * 0.16; // 0.28–0.44
-        outerSizes[i]  = 3.5 + Math.random() * 2.5;   // 3.5–6px
-      } else if (t > 0.2) {
-        // Mid-shell — visible blue points
-        outerAlphas[i] = 0.14 + Math.random() * 0.10; // 0.14–0.24
-        outerSizes[i]  = 2.0 + Math.random() * 1.5;   // 2.0–3.5px
+
+      // 8% of particles are large "sparkle" stars (mimic the crystalline flash in reference)
+      const isStar = Math.random() < 0.08;
+      if (t > 0.75) {
+        outerAlphas[i] = isStar
+          ? 0.55 + Math.random() * 0.30  // bright sparkle star
+          : 0.22 + Math.random() * 0.18; // normal tip particle
+        outerSizes[i] = isStar
+          ? 4.5 + Math.random() * 4.0   // 4.5–8.5px
+          : 2.5 + Math.random() * 2.5;  // 2.5–5px
+      } else if (t > 0.45) {
+        outerAlphas[i] = isStar
+          ? 0.35 + Math.random() * 0.20
+          : 0.14 + Math.random() * 0.12;
+        outerSizes[i] = isStar
+          ? 3.0 + Math.random() * 2.5
+          : 1.8 + Math.random() * 1.8;
       } else {
-        // Base shell — fine texture
-        outerAlphas[i] = 0.06 + Math.random() * 0.06; // 0.06–0.12
-        outerSizes[i]  = 1.0 + Math.random() * 0.8;   // 1.0–1.8px
+        outerAlphas[i] = 0.07 + Math.random() * 0.07;
+        outerSizes[i]  = 1.0 + Math.random() * 1.0;
       }
+
+      outerPlaced++;
     }
 
     const outerGeo = new BufferGeometry();
     outerGeo.setAttribute("position", new BufferAttribute(outerPositions, 3));
-    outerGeo.setAttribute("aColor", new BufferAttribute(outerColors, 3));
-    outerGeo.setAttribute("aAlpha", new BufferAttribute(outerAlphas, 1));
-    outerGeo.setAttribute("size", new BufferAttribute(outerSizes, 1));
+    outerGeo.setAttribute("aColor",   new BufferAttribute(outerColors, 3));
+    outerGeo.setAttribute("aAlpha",   new BufferAttribute(outerAlphas, 1));
+    outerGeo.setAttribute("size",     new BufferAttribute(outerSizes, 1));
 
     const outerMat = new ShaderMaterial({
       vertexShader: SPHERE_VERT,
@@ -336,199 +363,78 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     sphereGroup.add(new Points(outerGeo, outerMat));
 
-    // ── LAYER 2: Inner volume — 10000 particles, denser toward center ─────────
+    // ── LAYER 2: Spiked dark moat ─────────────────────────────────────────────
+    // r = MOAT_INNER to SHELL_INNER. Almost entirely empty.
+    //
+    // SPIKE mechanism: in 2D screen-space projection the angle atan2(ny, nx)
+    // determines which "angular slice" the particle falls in. We define SPIKE_COUNT
+    // evenly-spaced void cones. Particles in void cones are rejected, creating the
+    // dark claw-shaped spikes radiating from the core outward. Surviving bridge
+    // particles are then kept at only 4% probability (very sparse).
+    //
+    // Void width grows with r (narrow at core, wide near outer shell) — this gives
+    // the "converging claw" silhouette of the reference image.
 
-    const innerPositions = new Float32Array(INNER_COUNT * 3);
-    const innerColors = new Float32Array(INNER_COUNT * 3);
-    const innerAlphas = new Float32Array(INNER_COUNT);
-    const innerSizes = new Float32Array(INNER_COUNT);
+    const moatPositions = new Float32Array(MOAT_COUNT * 3);
+    const moatColors    = new Float32Array(MOAT_COUNT * 3);
+    const moatAlphas    = new Float32Array(MOAT_COUNT);
+    const moatSizes     = new Float32Array(MOAT_COUNT);
 
-    const colInnerBlue = hexToRgb("#2244aa");    // deep cold blue outer ring
-    const colOrange = hexToRgb("#ff4400");       // burning orange mid
-    const colRed = hexToRgb("#ff5500");          // burning orange core
+    const spikePeriod = (Math.PI * 2) / SPIKE_COUNT;
+    // Random overall angular offset so spikes aren't always axis-aligned
+    const spikePhase  = Math.random() * spikePeriod;
 
-    // Petal void axes — 6 directions that carve dark claws
-    const PETAL_COUNT = 6;
-    const petalAxes: [number, number, number][] = [];
-    for (let p = 0; p < PETAL_COUNT; p++) {
-      const angle = (p / PETAL_COUNT) * Math.PI * 2;
-      // Tilted petal axes so they're visible at the front
-      petalAxes.push([
-        Math.cos(angle) * 0.85,
-        Math.sin(angle) * 0.85,
-        0.3 + Math.random() * 0.4,
-      ]);
-    }
+    let moatPlaced = 0;
+    let moatAttempts = 0;
+    while (moatPlaced < MOAT_COUNT && moatAttempts < MOAT_COUNT * 20) {
+      moatAttempts++;
 
-    let innerPlaced = 0;
-    let innerAttempts = 0;
-    while (innerPlaced < INNER_COUNT && innerAttempts < INNER_COUNT * 12) {
-      innerAttempts++;
-      const r = OUTER_RADIUS * Math.pow(Math.random(), 0.4);
+      const r = MOAT_INNER + Math.random() * (SHELL_INNER - MOAT_INNER);
       const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
+      const phi   = Math.acos(2 * Math.random() - 1);
       const nx = Math.sin(phi) * Math.cos(theta);
       const ny = Math.sin(phi) * Math.sin(theta);
       const nz = Math.cos(phi);
-      const i = innerPlaced;
 
-      // Carve dark petal voids in the mid-shell region (r 80–200)
-      if (r > 45 && r < 85) {
-        let inPetalVoid = false;
-        for (const axis of petalAxes) {
-          // Dot product = angular alignment with petal axis
-          const dot = nx * axis[0] + ny * axis[1] + nz * axis[2];
-          const alignedLength = Math.sqrt(axis[0] ** 2 + axis[1] ** 2 + axis[2] ** 2);
-          const cosAngle = dot / alignedLength;
-          // Void threshold: angular cone of ~28 degrees
-          const voidWidth = 0.12 + (r / OUTER_RADIUS) * 0.10;
-          if (cosAngle > (1 - voidWidth)) {
-            inPetalVoid = true;
-            break;
-          }
-        }
-        if (inPetalVoid) continue; // skip — creates the dark petal shapes
-      }
+      // 2D projected angle (orthographic: screen pos = nx*r, ny*r → angle = atan2(ny, nx))
+      const angle2D = ((Math.atan2(ny, nx) + Math.PI * 2 + spikePhase) % (Math.PI * 2));
+      const withinPeriod = angle2D % spikePeriod;
 
-      innerPositions[i * 3]     = nx * r;
-      innerPositions[i * 3 + 1] = ny * r;
-      innerPositions[i * 3 + 2] = nz * r;
+      // Void half-width grows from 28% of half-period at inner edge to 44% at outer
+      const radFraction = (r - MOAT_INNER) / (SHELL_INNER - MOAT_INNER); // 0→1
+      // Noise perturbation for organic ragged spike edges
+      const edgeNoise = simplex3(nx * 3.5 + 7, ny * 3.5 + 13, nz * 3.5) * 0.06;
+      const voidHalfFrac = 0.28 + radFraction * 0.16 + edgeNoise; // 0.28→0.44 + noise
+      const voidHalfAngle = spikePeriod * voidHalfFrac;
 
-      let col: [number, number, number];
-      let alpha: number;
-      let size: number;
+      const inVoid = withinPeriod < voidHalfAngle || withinPeriod > (spikePeriod - voidHalfAngle);
+      if (inVoid) continue; // dark spike zone — no particles here
 
-      if (r > 85) {
-        // Terrifying dark moat — nearly empty, creates the stark black ring
-        if (Math.random() > 0.03) continue;
-        col = colDeepBlue;
-        alpha = 0.06;
-        size = 0.6;
-      } else if (r > 45) {
-        // Transition zone: orange→blue ring around core
-        // Screen-space clear: reject particles projecting onto core center
-        const screenR2 = (nx * nx + ny * ny) * r * r;
-        if (screenR2 < 55 * 55) continue;
-        col = lerpColor(colOrange, colInnerBlue, (r - 45) / 40);
-        alpha = 0.55;
-        size = 1.6;
-      } else if (r > 18) {
-        // Hot orange zone
-        col = colOrange;
-        alpha = 0.82;
-        size = 2.8;
-      } else {
-        // Dead center: burning orange core
-        col = colRed;
-        alpha = 0.98;
-        size = 5.0;
-      }
+      // Bridge zone: very sparse (3% survival)
+      if (Math.random() > 0.03) continue;
 
-      innerColors[i * 3]     = col[0];
-      innerColors[i * 3 + 1] = col[1];
-      innerColors[i * 3 + 2] = col[2];
-      innerAlphas[i] = alpha;
-      innerSizes[i]  = size;
-      innerPlaced++;
+      const i = moatPlaced;
+      moatPositions[i * 3]     = nx * r;
+      moatPositions[i * 3 + 1] = ny * r;
+      moatPositions[i * 3 + 2] = nz * r;
+
+      // Dim deep-blue bridge particles (barely visible against the black background)
+      moatColors[i * 3]     = colDeepBlue[0];
+      moatColors[i * 3 + 1] = colDeepBlue[1];
+      moatColors[i * 3 + 2] = colDeepBlue[2];
+      moatAlphas[i] = 0.10 + Math.random() * 0.10;
+      moatSizes[i]  = 0.8 + Math.random() * 0.8;
+
+      moatPlaced++;
     }
 
-    const innerGeo = new BufferGeometry();
-    innerGeo.setAttribute("position", new BufferAttribute(innerPositions, 3));
-    innerGeo.setAttribute("aColor", new BufferAttribute(innerColors, 3));
-    innerGeo.setAttribute("aAlpha", new BufferAttribute(innerAlphas, 1));
-    innerGeo.setAttribute("size", new BufferAttribute(innerSizes, 1));
+    const moatGeo = new BufferGeometry();
+    moatGeo.setAttribute("position", new BufferAttribute(moatPositions, 3));
+    moatGeo.setAttribute("aColor",   new BufferAttribute(moatColors, 3));
+    moatGeo.setAttribute("aAlpha",   new BufferAttribute(moatAlphas, 1));
+    moatGeo.setAttribute("size",     new BufferAttribute(moatSizes, 1));
 
-    const innerMat = new ShaderMaterial({
-      vertexShader: SPHERE_VERT,
-      fragmentShader: SPHERE_FRAG,
-      uniforms: {
-        breathe: { value: 1.0 },
-        uGlobalAlpha: { value: 1.0 },
-        uCoreBrightness: { value: 1.0 }, // animated on feeding
-      },
-      transparent: true,
-      depthWrite: false,
-      blending: AdditiveBlending,
-    });
-
-    sphereGroup.add(new Points(innerGeo, innerMat));
-
-    // ── LAYER 3: Core glow sprite ─────────────────────────────────────────────
-
-    const glowCanvas = document.createElement("canvas");
-    glowCanvas.width = 128;
-    glowCanvas.height = 128;
-    const ctx = glowCanvas.getContext("2d")!;
-    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0,    "rgba(255, 255, 255, 1.0)");  // blinding white
-    gradient.addColorStop(0.08, "rgba(255, 200, 80, 1.0)");   // sear yellow
-    gradient.addColorStop(0.2,  "rgba(255, 40, 0, 0.95)");    // violent red
-    gradient.addColorStop(0.38, "rgba(180, 0, 80, 0.7)");     // deep magenta-red
-    gradient.addColorStop(0.55, "rgba(60, 0, 40, 0.35)");     // dark violet
-    gradient.addColorStop(0.75, "rgba(10, 0, 10, 0.1)");
-    gradient.addColorStop(1,    "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 128, 128);
-
-    const glowTexture = new CanvasTexture(glowCanvas);
-    const glowMat = new SpriteMaterial({
-      map: glowTexture,
-      blending: AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-    });
-    const glowSprite = new Sprite(glowMat);
-    glowSprite.scale.set(200, 200, 1);
-    glowSprite.position.set(0, 0, 1);
-    sphereGroup.add(glowSprite);
-
-    // ── LAYER 4: Spike tendrils — 8 tendrils ─────────────────────────────────
-
-    const tendrilTotalParticles = TENDRIL_COUNT * PARTICLES_PER_TENDRIL;
-    const tendrilPositions = new Float32Array(tendrilTotalParticles * 3);
-    const tendrilColors = new Float32Array(tendrilTotalParticles * 3);
-    const tendrilAlphas = new Float32Array(tendrilTotalParticles);
-    const tendrilSizes = new Float32Array(tendrilTotalParticles);
-
-    const tendrilBasePoints: {
-      nx: number; ny: number; nz: number; length: number;
-    }[] = [];
-    for (let t = 0; t < TENDRIL_COUNT; t++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      tendrilBasePoints.push({
-        nx: Math.sin(phi) * Math.cos(theta),
-        ny: Math.sin(phi) * Math.sin(theta),
-        nz: Math.cos(phi),
-        length: 200 + Math.random() * 280,
-      });
-    }
-
-    for (let t = 0; t < TENDRIL_COUNT; t++) {
-      const base = tendrilBasePoints[t];
-      for (let p = 0; p < PARTICLES_PER_TENDRIL; p++) {
-        const idx = t * PARTICLES_PER_TENDRIL + p;
-        const progress = p / PARTICLES_PER_TENDRIL;
-        // Bright at base (emerging from blue shell),
-        // dark and thin at tips
-        const tipFade = Math.pow(1 - progress, 0.5);
-        tendrilColors[idx * 3]     = colMedBlue[0] * tipFade;
-        tendrilColors[idx * 3 + 1] = colMedBlue[1] * tipFade;
-        tendrilColors[idx * 3 + 2] = colMedBlue[2] * tipFade;
-        tendrilAlphas[idx] = 0.45 * tipFade;
-        // Base size varies by arm — some thick, some medium
-        const armThickness = 2.5 + (t % 3) * 1.5; // 2.5, 4.0, 5.5 cycling
-        tendrilSizes[idx]  = armThickness * tipFade + 0.4;
-      }
-    }
-
-    const tendrilGeo = new BufferGeometry();
-    tendrilGeo.setAttribute("position", new BufferAttribute(tendrilPositions, 3));
-    tendrilGeo.setAttribute("aColor", new BufferAttribute(tendrilColors, 3));
-    tendrilGeo.setAttribute("aAlpha", new BufferAttribute(tendrilAlphas, 1));
-    tendrilGeo.setAttribute("size", new BufferAttribute(tendrilSizes, 1));
-
-    const tendrilMat = new ShaderMaterial({
+    const moatMat = new ShaderMaterial({
       vertexShader: SPHERE_VERT,
       fragmentShader: SPHERE_FRAG,
       uniforms: {
@@ -541,18 +447,131 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       blending: AdditiveBlending,
     });
 
-    sphereGroup.add(new Points(tendrilGeo, tendrilMat));
+    sphereGroup.add(new Points(moatGeo, moatMat));
 
-    // ── LAYER 5: Feeding stream — 600 particles, not part of sphere group ──────
+    // ── LAYER 3: Hot core ─────────────────────────────────────────────────────
+    // Dense spherical volume: r = 0 to MOAT_INNER.
+    // Colors: white-hot center → yellow → orange → deep red at edge.
+    // Includes a thin "corona" fade at r=65–82 where orange sparks into dark.
 
-    const streamPos = new Float32Array(STREAM_COUNT * 3);
+    const corePositions = new Float32Array(CORE_COUNT * 3);
+    const coreColors    = new Float32Array(CORE_COUNT * 3);
+    const coreAlphas    = new Float32Array(CORE_COUNT);
+    const coreSizes     = new Float32Array(CORE_COUNT);
+
+    for (let i = 0; i < CORE_COUNT; i++) {
+      // Bias toward center: pow(rand, 0.55) → more particles near r=0
+      const r = MOAT_INNER * Math.pow(Math.random(), 0.55);
+      const theta = Math.random() * Math.PI * 2;
+      const phi   = Math.acos(2 * Math.random() - 1);
+      const nx = Math.sin(phi) * Math.cos(theta);
+      const ny = Math.sin(phi) * Math.sin(theta);
+      const nz = Math.cos(phi);
+
+      corePositions[i * 3]     = nx * r;
+      corePositions[i * 3 + 1] = ny * r;
+      corePositions[i * 3 + 2] = nz * r;
+
+      // t=0 center, t=1 outer edge
+      const t = r / MOAT_INNER;
+
+      let col: [number, number, number];
+      let alpha: number;
+      let size: number;
+
+      if (t < 0.12) {
+        // Dead center: blinding white-yellow
+        col   = lerpColor(colCoreWhite, colCoreYellow, t / 0.12);
+        alpha = 0.95 + Math.random() * 0.05;
+        size  = 4.5 + Math.random() * 2.5; // 4.5–7px
+      } else if (t < 0.30) {
+        // Inner hot zone: yellow → orange
+        col   = lerpColor(colCoreYellow, colCoreOrange, (t - 0.12) / 0.18);
+        alpha = 0.85 + Math.random() * 0.10;
+        size  = 3.0 + Math.random() * 2.0; // 3–5px
+      } else if (t < 0.58) {
+        // Mid core: orange → red
+        col   = lerpColor(colCoreOrange, colCoreRed, (t - 0.30) / 0.28);
+        alpha = 0.70 + Math.random() * 0.15;
+        size  = 2.0 + Math.random() * 1.5; // 2–3.5px
+      } else if (t < 0.80) {
+        // Outer core: red → dark red
+        col   = lerpColor(colCoreRed, colCoreDarkRed, (t - 0.58) / 0.22);
+        alpha = 0.50 + Math.random() * 0.20;
+        size  = 1.4 + Math.random() * 1.0; // 1.4–2.4px
+      } else {
+        // Corona fringe: dark red fading to almost nothing
+        col   = colCoreDarkRed;
+        alpha = (1.0 - (t - 0.80) / 0.20) * 0.35 + Math.random() * 0.10;
+        size  = 1.0 + Math.random() * 0.8;
+      }
+
+      coreColors[i * 3]     = col[0];
+      coreColors[i * 3 + 1] = col[1];
+      coreColors[i * 3 + 2] = col[2];
+      coreAlphas[i] = alpha;
+      coreSizes[i]  = size;
+    }
+
+    const coreGeo = new BufferGeometry();
+    coreGeo.setAttribute("position", new BufferAttribute(corePositions, 3));
+    coreGeo.setAttribute("aColor",   new BufferAttribute(coreColors, 3));
+    coreGeo.setAttribute("aAlpha",   new BufferAttribute(coreAlphas, 1));
+    coreGeo.setAttribute("size",     new BufferAttribute(coreSizes, 1));
+
+    const coreMat = new ShaderMaterial({
+      vertexShader: SPHERE_VERT,
+      fragmentShader: SPHERE_FRAG,
+      uniforms: {
+        breathe: { value: 1.0 },
+        uGlobalAlpha: { value: 1.0 },
+        uCoreBrightness: { value: 1.0 },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: AdditiveBlending,
+    });
+
+    sphereGroup.add(new Points(coreGeo, coreMat));
+
+    // ── LAYER 4: Core glow sprite ─────────────────────────────────────────────
+
+    const glowCanvas = document.createElement("canvas");
+    glowCanvas.width = 256;
+    glowCanvas.height = 256;
+    const ctx = glowCanvas.getContext("2d")!;
+    const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    gradient.addColorStop(0.00, "rgba(255, 255, 255, 1.0)");  // blinding white core
+    gradient.addColorStop(0.05, "rgba(255, 240, 120, 1.0)");  // hot yellow
+    gradient.addColorStop(0.14, "rgba(255, 120, 10, 0.95)");  // deep orange
+    gradient.addColorStop(0.28, "rgba(200, 20, 0, 0.80)");    // red
+    gradient.addColorStop(0.45, "rgba(100, 0, 0, 0.45)");     // dark red
+    gradient.addColorStop(0.65, "rgba(30, 0, 0, 0.15)");      // near black
+    gradient.addColorStop(1.00, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 256, 256);
+
+    const glowTexture = new CanvasTexture(glowCanvas);
+    const glowMat = new SpriteMaterial({
+      map: glowTexture,
+      blending: AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
+    const glowSprite = new Sprite(glowMat);
+    glowSprite.scale.set(210, 210, 1);
+    glowSprite.position.set(0, 0, 1);
+    sphereGroup.add(glowSprite);
+
+    // ── LAYER 5: Feeding stream ───────────────────────────────────────────────
+
+    const streamPos    = new Float32Array(STREAM_COUNT * 3);
     const streamColors = new Float32Array(STREAM_COUNT * 3);
     const streamAlphas = new Float32Array(STREAM_COUNT);
-    const streamSizes = new Float32Array(STREAM_COUNT);
+    const streamSizes  = new Float32Array(STREAM_COUNT);
 
-    // Per-particle state (CPU side, not GPU attributes)
-    const streamT = new Float32Array(STREAM_COUNT);
-    const streamAlive = new Uint8Array(STREAM_COUNT);
+    const streamT      = new Float32Array(STREAM_COUNT);
+    const streamAlive  = new Uint8Array(STREAM_COUNT);
     const streamOriginX = new Float32Array(STREAM_COUNT);
     const streamOriginY = new Float32Array(STREAM_COUNT);
 
@@ -564,10 +583,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     }
 
     const streamGeo = new BufferGeometry();
-    streamGeo.setAttribute("position", new BufferAttribute(streamPos, 3));
+    streamGeo.setAttribute("position",     new BufferAttribute(streamPos, 3));
     streamGeo.setAttribute("aStreamColor", new BufferAttribute(streamColors, 3));
     streamGeo.setAttribute("aStreamAlpha", new BufferAttribute(streamAlphas, 1));
-    streamGeo.setAttribute("size", new BufferAttribute(streamSizes, 1));
+    streamGeo.setAttribute("size",         new BufferAttribute(streamSizes, 1));
 
     const streamMat = new ShaderMaterial({
       vertexShader: STREAM_VERT,
@@ -577,22 +596,20 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       blending: AdditiveBlending,
     });
 
-    // Added to scene directly — NOT sphereGroup — so it doesn't rotate
     scene.add(new Points(streamGeo, streamMat));
 
-    // Stream color palettes (percolation reference)
-    const colCyan = hexToRgb("#00ccff");
-    const colAmber = hexToRgb("#ffaa00");
+    const colCyan    = hexToRgb("#00ccff");
+    const colAmber   = hexToRgb("#ffaa00");
     const colDeepRed = hexToRgb("#ff2800");
 
     // ── Dynamic state ─────────────────────────────────────────────────────────
 
-    let feedActive = false;
-    let feedTargetWorldX = 0;
-    let feedTargetWorldY = 0;
-    let coreBrightness = 1.0;
+    let feedActive        = false;
+    let feedTargetWorldX  = 0;
+    let feedTargetWorldY  = 0;
+    let coreBrightness       = 1.0;
     let coreBrightnessTarget = 1.0;
-    let globalAlpha = 1.0;
+    let globalAlpha       = 1.0;
     let globalAlphaTarget = 1.0;
 
     // ── Event handlers ────────────────────────────────────────────────────────
@@ -608,7 +625,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const onStopFeeding = () => {
       feedActive = false;
       coreBrightnessTarget = 1.0;
-      // Kill all stream particles immediately
       for (let i = 0; i < STREAM_COUNT; i++) {
         streamAlive[i] = 0;
         streamPos[i * 3] = -99999;
@@ -630,9 +646,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     };
 
     window.addEventListener("creature-start-feeding", onStartFeeding);
-    window.addEventListener("creature-stop-feeding", onStopFeeding);
+    window.addEventListener("creature-stop-feeding",  onStopFeeding);
     window.addEventListener("creature-char-consumed", onCharConsumed);
-    window.addEventListener("creature-dim", handleDim);
+    window.addEventListener("creature-dim",           handleDim);
 
     // ── Animation loop ────────────────────────────────────────────────────────
 
@@ -641,36 +657,33 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     function animate() {
       time += 0.016;
 
-      // ── Breathing ──────────────────────────────────────────────────────────
-      const breathe = Math.sin(time * 0.35) * 0.055 + 1.0;
+      // Slow breathing
+      const breathe = Math.sin(time * 0.32) * 0.045 + 1.0;
       outerMat.uniforms.breathe.value = breathe;
-      innerMat.uniforms.breathe.value = breathe;
-      tendrilMat.uniforms.breathe.value = breathe;
+      moatMat.uniforms.breathe.value  = breathe;
+      coreMat.uniforms.breathe.value  = breathe;
 
-      // ── Rotation ───────────────────────────────────────────────────────────
-      sphereGroup.rotation.y += 0.00018;
-      sphereGroup.rotation.x += 0;
+      // Very slow rotation
+      sphereGroup.rotation.y += 0.00015;
 
-      // ── Part C: Core brightness (feeding response) ─────────────────────────
-      // Ramp up fast (40 frames), decay slow (120 frames)
-      const brightnessLerp = coreBrightness < coreBrightnessTarget ? 0.05 : 0.015;
-      coreBrightness += (coreBrightnessTarget - coreBrightness) * brightnessLerp;
-      innerMat.uniforms.uCoreBrightness.value = coreBrightness;
-      // Pulse sprite scale with brightness
-      const spriteScale = 200 * (0.7 + 0.5 * coreBrightness);
+      // Core brightness (feeding response)
+      const bLerp = coreBrightness < coreBrightnessTarget ? 0.05 : 0.015;
+      coreBrightness += (coreBrightnessTarget - coreBrightness) * bLerp;
+      coreMat.uniforms.uCoreBrightness.value = coreBrightness;
+      outerMat.uniforms.uCoreBrightness.value = 1.0; // outer shell never brightens
+      const spriteScale = 210 * (0.75 + 0.45 * coreBrightness);
       glowSprite.scale.set(spriteScale, spriteScale, 1);
 
-      // ── Part D: Global dim (search overlay) ────────────────────────────────
-      const alphaLerp = globalAlphaTarget < globalAlpha ? 0.05 : 0.04;
-      globalAlpha += (globalAlphaTarget - globalAlpha) * alphaLerp;
+      // Global dim (search overlay)
+      const aLerp = globalAlphaTarget < globalAlpha ? 0.05 : 0.04;
+      globalAlpha += (globalAlphaTarget - globalAlpha) * aLerp;
       outerMat.uniforms.uGlobalAlpha.value = globalAlpha;
-      innerMat.uniforms.uGlobalAlpha.value = globalAlpha;
-      tendrilMat.uniforms.uGlobalAlpha.value = globalAlpha;
+      moatMat.uniforms.uGlobalAlpha.value  = globalAlpha;
+      coreMat.uniforms.uGlobalAlpha.value  = globalAlpha;
       glowMat.opacity = globalAlpha;
 
-      // ── Part B: Stream particle system ─────────────────────────────────────
+      // Stream particle system (feeding animation)
       if (feedActive) {
-        // Emit 8 particles per frame from current target position
         const spreadWorld = (80 / height) * visibleHalfH * 2;
         let emitted = 0;
         for (let i = 0; i < STREAM_COUNT && emitted < 8; i++) {
@@ -684,9 +697,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         }
       }
 
-      // Update all alive stream particles
-      const posArr = streamGeo.getAttribute("position").array as Float32Array;
-      const colArr = streamGeo.getAttribute("aStreamColor").array as Float32Array;
+      const posArr   = streamGeo.getAttribute("position").array as Float32Array;
+      const colArr   = streamGeo.getAttribute("aStreamColor").array as Float32Array;
       const alphaArr = streamGeo.getAttribute("aStreamAlpha").array as Float32Array;
 
       for (let i = 0; i < STREAM_COUNT; i++) {
@@ -704,27 +716,20 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
           continue;
         }
 
-        // Arc: lerp from origin to sphere center (0,0), sine wiggle
-        posArr[i * 3] = streamOriginX[i] * (1 - t)
-          + Math.sin(t * Math.PI + i * 0.3) * 30;
+        posArr[i * 3]     = streamOriginX[i] * (1 - t) + Math.sin(t * Math.PI + i * 0.3) * 30;
         posArr[i * 3 + 1] = streamOriginY[i] * (1 - t);
         posArr[i * 3 + 2] = 0;
 
-        // Age-based color: cyan → amber → deep red (percolation reference)
         let col: [number, number, number];
-        if (t < 0.3) {
-          col = lerpColor(colCyan, colAmber, t / 0.3);
-        } else if (t < 0.7) {
-          col = lerpColor(colAmber, colDeepRed, (t - 0.3) / 0.4);
-        } else {
-          col = colDeepRed;
-        }
-        colArr[i * 3] = col[0];
+        if (t < 0.3)      col = lerpColor(colCyan, colAmber, t / 0.3);
+        else if (t < 0.7) col = lerpColor(colAmber, colDeepRed, (t - 0.3) / 0.4);
+        else              col = colDeepRed;
+
+        colArr[i * 3]     = col[0];
         colArr[i * 3 + 1] = col[1];
         colArr[i * 3 + 2] = col[2];
 
-        // Alpha: fade in (0→0.1), full (0.1→0.8), fade out (0.8→1.0)
-        const fadeIn = Math.min(1, t / 0.1);
+        const fadeIn  = Math.min(1, t / 0.1);
         const fadeOut = Math.max(0, 1 - Math.max(0, (t - 0.8) / 0.2));
         alphaArr[i] = 0.6 * fadeIn * fadeOut;
       }
@@ -732,26 +737,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       (streamGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
       (streamGeo.getAttribute("aStreamColor") as BufferAttribute).needsUpdate = true;
       (streamGeo.getAttribute("aStreamAlpha") as BufferAttribute).needsUpdate = true;
-
-      // ── Tendril animation (writhing) ───────────────────────────────────────
-      const tPos = tendrilGeo.getAttribute("position").array as Float32Array;
-      for (let t = 0; t < TENDRIL_COUNT; t++) {
-        const base = tendrilBasePoints[t];
-        for (let p = 0; p < PARTICLES_PER_TENDRIL; p++) {
-          const idx = t * PARTICLES_PER_TENDRIL + p;
-          const progress = p / PARTICLES_PER_TENDRIL;
-          const dist = OUTER_RADIUS + progress * base.length;
-          const warp = time * 0.8 + t * 1.3;
-          const ns = 0.04;
-          const dx = simplex3(base.nx * dist * ns + warp, base.ny * dist * ns + 100, base.nz * dist * ns) * 80 * progress;
-          const dy = simplex3(base.nx * dist * ns + 200, base.ny * dist * ns + warp, base.nz * dist * ns) * 80 * progress;
-          const dz = simplex3(base.nx * dist * ns, base.ny * dist * ns + 300, base.nz * dist * ns + warp) * 80 * progress;
-          tPos[idx * 3]     = base.nx * dist + dx;
-          tPos[idx * 3 + 1] = base.ny * dist + dy;
-          tPos[idx * 3 + 2] = base.nz * dist + dz;
-        }
-      }
-      (tendrilGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
 
       composer.render();
       animFrameRef.current = window.requestAnimationFrame(animate);
@@ -762,14 +747,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     // ── Resize ────────────────────────────────────────────────────────────────
 
     function onResize() {
-      width = window.innerWidth;
+      width  = window.innerWidth;
       height = window.innerHeight;
       aspect = width / height;
       renderer.setSize(width, height);
       composer.setSize(width, height);
-      camera.left = -visibleHalfH * aspect;
-      camera.right = visibleHalfH * aspect;
-      camera.top = visibleHalfH;
+      camera.left   = -visibleHalfH * aspect;
+      camera.right  =  visibleHalfH * aspect;
+      camera.top    =  visibleHalfH;
       camera.bottom = -visibleHalfH;
       camera.updateProjectionMatrix();
     }
@@ -780,21 +765,16 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     return () => {
       window.cancelAnimationFrame(animFrameRef.current);
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("creature-start-feeding", onStartFeeding);
-      window.removeEventListener("creature-stop-feeding", onStopFeeding);
-      window.removeEventListener("creature-char-consumed", onCharConsumed);
-      window.removeEventListener("creature-dim", handleDim);
-      outerGeo.dispose();
-      outerMat.dispose();
-      innerGeo.dispose();
-      innerMat.dispose();
-      tendrilGeo.dispose();
-      tendrilMat.dispose();
-      streamGeo.dispose();
-      streamMat.dispose();
-      glowTexture.dispose();
-      glowMat.dispose();
+      window.removeEventListener("resize",                   onResize);
+      window.removeEventListener("creature-start-feeding",   onStartFeeding);
+      window.removeEventListener("creature-stop-feeding",    onStopFeeding);
+      window.removeEventListener("creature-char-consumed",   onCharConsumed);
+      window.removeEventListener("creature-dim",             handleDim);
+      outerGeo.dispose();    outerMat.dispose();
+      moatGeo.dispose();     moatMat.dispose();
+      coreGeo.dispose();     coreMat.dispose();
+      streamGeo.dispose();   streamMat.dispose();
+      glowTexture.dispose(); glowMat.dispose();
       composer.dispose();
       renderer.dispose();
     };
