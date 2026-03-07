@@ -3,13 +3,7 @@ import { MDXRemote } from "next-mdx-remote/rsc";
 import { getAllNotes, getNoteBySlug } from "@/lib/vault";
 import NoteShell from "@/components/NoteShell";
 
-interface NotePageProps {
-  params: {
-    slug: string;
-  };
-}
-
-function transformWikilinksToMarkdownLinks(content: string): string {
+function transformWikilinks(content: string): string {
   return content.replace(/\[\[([^\]]+)\]\]/g, (_match, inner: string) => {
     const [rawSlug, labelOverride] = inner.split("|");
     const slug = rawSlug.trim().toLowerCase().replace(/\s+/g, "-");
@@ -19,26 +13,23 @@ function transformWikilinksToMarkdownLinks(content: string): string {
 }
 
 export async function generateStaticParams() {
-  const all = getAllNotes().filter((note) => note.type === "note");
-  return all.map((note) => ({ slug: note.slug }));
+  const all = getAllNotes().filter((n) => n.type === "note");
+  return all.map((n) => ({ slug: n.slug }));
 }
 
-export default function NotePage({ params }: NotePageProps) {
-  const note = getNoteBySlug(params.slug);
-
-  if (!note || note.type !== "note") {
-    return notFound();
-  }
-
-  const transformed = transformWikilinksToMarkdownLinks(note.content);
-
+export default async function NotePage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const note = getNoteBySlug(slug);
+  if (!note || note.type !== "note") return notFound();
+  const transformed = transformWikilinks(note.content);
   const wordCount = note.content
     .split(/\s+/)
-    .filter((token) => token.trim().length > 0).length;
+    .filter((t) => t.trim().length > 0).length;
   const minutes = Math.max(1, Math.round(wordCount / 200));
-
-  const mdx = <MDXRemote source={transformed} />;
-
   return (
     <NoteShell
       slug={note.slug}
@@ -52,8 +43,7 @@ export default function NotePage({ params }: NotePageProps) {
       minutes={minutes}
       backlinks={note.backlinks}
     >
-      {mdx}
+      <MDXRemote source={transformed} />
     </NoteShell>
   );
 }
-
