@@ -82,10 +82,10 @@ function simplex3(xin: number, yin: number, zin: number): number {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const OUTER_COUNT = 14000;
-const INNER_COUNT = 10000;
-const TENDRIL_COUNT = 16;
-const PARTICLES_PER_TENDRIL = 280;
+const OUTER_COUNT = 40000;     // dense packed shell
+const INNER_COUNT = 22000;     // rich inner volume
+const TENDRIL_COUNT = 20;
+const PARTICLES_PER_TENDRIL = 300;
 const OUTER_RADIUS = 260;
 const STREAM_COUNT = 600;
 
@@ -245,9 +245,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.85,
-      0.35,
-      0.38
+      0.65,
+      0.25,
+      0.45
     );
     composer.addPass(bloomPass);
 
@@ -274,36 +274,28 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       const ny = Math.sin(phi) * Math.sin(theta);
       const nz = Math.cos(phi);
 
-      const noiseVal = simplex3(nx * 2, ny * 2, nz * 2);
-      const r = OUTER_RADIUS + noiseVal * 95;
+      const noiseVal = simplex3(nx * 3, ny * 3, nz * 3);
+      const r = OUTER_RADIUS + noiseVal * 45;
 
       outerPositions[i * 3] = nx * r;
       outerPositions[i * 3 + 1] = ny * r;
       outerPositions[i * 3 + 2] = nz * r;
 
       let col: [number, number, number];
-      if (r > 200) {
-        col = colPaleBW;
-      } else if (r > 140) {
-        col = lerpColor(colMedBlue, colPaleBW, (r - 140) / 60);
+      if (r > 275) {
+        col = colPaleBW;                              // tips: cold white
+      } else if (r > 240) {
+        col = lerpColor(colMedBlue, colPaleBW, (r - 240) / 35);
       } else {
-        col = lerpColor(colDeepBlue, colMedBlue, Math.max(0, (r - 80) / 60));
+        col = lerpColor(colDeepBlue, colMedBlue, Math.max(0, (r - 200) / 40));
       }
 
-      outerColors[i * 3] = col[0];
+      outerColors[i * 3]     = col[0];
       outerColors[i * 3 + 1] = col[1];
       outerColors[i * 3 + 2] = col[2];
-      // Particles far out from the noise spikes = the "note particles"
-      // Give them more size variance and slightly higher base alpha
-      const distFromSurface = r - OUTER_RADIUS;
-      if (distFromSurface > 30) {
-        // Spiked-out particles: these are the "note" particles
-        outerAlphas[i] = 0.35 + Math.random() * 0.25;
-        outerSizes[i] = 1.2 + Math.random() * 1.8;  // range 1.2–3.0px
-      } else {
-        outerAlphas[i] = 0.18;
-        outerSizes[i] = 0.9;
-      }
+      // Uniform small particles — density creates the texture
+      outerAlphas[i] = 0.32 + Math.random() * 0.18;
+      outerSizes[i]  = 0.7 + Math.random() * 0.6;
     }
 
     const outerGeo = new BufferGeometry();
@@ -338,44 +330,90 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const colOrange = hexToRgb("#ff4400");       // burning orange mid
     const colRed = hexToRgb("#ffffff");          // WHITE-HOT dead center
 
-    for (let i = 0; i < INNER_COUNT; i++) {
-      const r = OUTER_RADIUS * Math.pow(Math.random(), 0.35);
+    // Petal void axes — 6 directions that carve dark claws
+    const PETAL_COUNT = 6;
+    const petalAxes: [number, number, number][] = [];
+    for (let p = 0; p < PETAL_COUNT; p++) {
+      const angle = (p / PETAL_COUNT) * Math.PI * 2;
+      // Tilted petal axes so they're visible at the front
+      petalAxes.push([
+        Math.cos(angle) * 0.85,
+        Math.sin(angle) * 0.85,
+        0.3 + Math.random() * 0.4,
+      ]);
+    }
 
+    let innerPlaced = 0;
+    let innerAttempts = 0;
+    while (innerPlaced < INNER_COUNT && innerAttempts < INNER_COUNT * 8) {
+      innerAttempts++;
+      const r = OUTER_RADIUS * Math.pow(Math.random(), 0.4);
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       const nx = Math.sin(phi) * Math.cos(theta);
       const ny = Math.sin(phi) * Math.sin(theta);
       const nz = Math.cos(phi);
+      const i = innerPlaced;
 
-      innerPositions[i * 3] = nx * r;
+      // Carve dark petal voids in the mid-shell region (r 80–200)
+      if (r > 80 && r < 200) {
+        let inPetalVoid = false;
+        for (const axis of petalAxes) {
+          // Dot product = angular alignment with petal axis
+          const dot = nx * axis[0] + ny * axis[1] + nz * axis[2];
+          const alignedLength = Math.sqrt(axis[0] ** 2 + axis[1] ** 2 + axis[2] ** 2);
+          const cosAngle = dot / alignedLength;
+          // Void threshold: angular cone of ~28 degrees
+          const voidWidth = 0.12 + (r / OUTER_RADIUS) * 0.10;
+          if (cosAngle > (1 - voidWidth)) {
+            inPetalVoid = true;
+            break;
+          }
+        }
+        if (inPetalVoid) continue; // skip — creates the dark petal shapes
+      }
+
+      innerPositions[i * 3]     = nx * r;
       innerPositions[i * 3 + 1] = ny * r;
       innerPositions[i * 3 + 2] = nz * r;
 
       let col: [number, number, number];
-      if (r > 120) {
+      let alpha: number;
+      let size: number;
+
+      if (r > 160) {
+        // Outer inner ring: cold blue, fading into outer shell
+        col = lerpColor(colInnerBlue, colDeepBlue, (r - 160) / 60);
+        alpha = 0.22;
+        size = 0.9;
+      } else if (r > 90) {
+        // Mid ring: deep blue, structured
         col = colInnerBlue;
-      } else if (r > 70) {
-        col = lerpColor(colOrange, colInnerBlue, (r - 70) / 50);
-      } else if (r > 40) {
+        alpha = 0.38;
+        size = 1.1;
+      } else if (r > 45) {
+        // Transition to hot core: blue → orange
+        col = lerpColor(colOrange, colInnerBlue, (r - 45) / 45);
+        alpha = 0.55;
+        size = 1.4;
+      } else if (r > 18) {
+        // Inner hot zone: orange
         col = colOrange;
+        alpha = 0.75;
+        size = 2.0;
       } else {
-        col = colRed;
+        // Dead center: WHITE-HOT burning point, very dense
+        col = colRed;  // #ffffff
+        alpha = 0.95;
+        size = 3.2;
       }
 
-      innerColors[i * 3] = col[0];
+      innerColors[i * 3]     = col[0];
       innerColors[i * 3 + 1] = col[1];
       innerColors[i * 3 + 2] = col[2];
-
-      if (r > 120) {
-        innerAlphas[i] = 0.20;
-        innerSizes[i] = 0.8;
-      } else if (r > 70) {
-        innerAlphas[i] = 0.50;
-        innerSizes[i] = 1.6;
-      } else {
-        innerAlphas[i] = 0.92;
-        innerSizes[i] = 2.6;
-      }
+      innerAlphas[i] = alpha;
+      innerSizes[i]  = size;
+      innerPlaced++;
     }
 
     const innerGeo = new BufferGeometry();
@@ -424,7 +462,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       depthWrite: false,
     });
     const glowSprite = new Sprite(glowMat);
-    glowSprite.scale.set(240, 240, 1);
+    glowSprite.scale.set(90, 90, 1);
     glowSprite.position.set(0, 0, 1);
     sphereGroup.add(glowSprite);
 
@@ -455,12 +493,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       for (let p = 0; p < PARTICLES_PER_TENDRIL; p++) {
         const idx = t * PARTICLES_PER_TENDRIL + p;
         const progress = p / PARTICLES_PER_TENDRIL;
-        const fade = 1 - progress;
-        tendrilColors[idx * 3] = colPaleBW[0] * fade;
-        tendrilColors[idx * 3 + 1] = colPaleBW[1] * fade;
-        tendrilColors[idx * 3 + 2] = colPaleBW[2] * fade;
-        tendrilAlphas[idx] = 0.08 * fade;
-        tendrilSizes[idx] = 0.7;
+        // Bright at base (emerging from blue shell),
+        // dark and thin at tips
+        const tipFade = Math.pow(1 - progress, 0.5);
+        tendrilColors[idx * 3]     = colMedBlue[0] * tipFade;
+        tendrilColors[idx * 3 + 1] = colMedBlue[1] * tipFade;
+        tendrilColors[idx * 3 + 2] = colMedBlue[2] * tipFade;
+        tendrilAlphas[idx] = 0.18 * tipFade;
+        tendrilSizes[idx]  = 0.5 + tipFade * 0.8;
       }
     }
 
@@ -599,7 +639,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       coreBrightness += (coreBrightnessTarget - coreBrightness) * brightnessLerp;
       innerMat.uniforms.uCoreBrightness.value = coreBrightness;
       // Pulse sprite scale with brightness
-      const spriteScale = 240 * (0.6 + 0.4 * coreBrightness);
+      const spriteScale = 90 * (0.7 + 0.5 * coreBrightness);
       glowSprite.scale.set(spriteScale, spriteScale, 1);
 
       // ── Part D: Global dim (search overlay) ────────────────────────────────
