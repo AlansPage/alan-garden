@@ -84,8 +84,8 @@ function simplex3(xin: number, yin: number, zin: number): number {
 
 const OUTER_COUNT = 40000;     // dense packed shell
 const INNER_COUNT = 22000;     // rich inner volume
-const TENDRIL_COUNT = 20;
-const PARTICLES_PER_TENDRIL = 300;
+const TENDRIL_COUNT = 7;
+const PARTICLES_PER_TENDRIL = 600;
 const OUTER_RADIUS = 260;
 const STREAM_COUNT = 600;
 
@@ -484,7 +484,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         nx: Math.sin(phi) * Math.cos(theta),
         ny: Math.sin(phi) * Math.sin(theta),
         nz: Math.cos(phi),
-        length: 120 + Math.random() * 160,
+        length: 200 + Math.random() * 280,
       });
     }
 
@@ -499,8 +499,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         tendrilColors[idx * 3]     = colMedBlue[0] * tipFade;
         tendrilColors[idx * 3 + 1] = colMedBlue[1] * tipFade;
         tendrilColors[idx * 3 + 2] = colMedBlue[2] * tipFade;
-        tendrilAlphas[idx] = 0.18 * tipFade;
-        tendrilSizes[idx]  = 0.5 + tipFade * 0.8;
+        tendrilAlphas[idx] = 0.45 * tipFade;
+        // Base size varies by arm — some thick, some medium
+        const armThickness = 2.5 + (t % 3) * 1.5; // 2.5, 4.0, 5.5 cycling
+        tendrilSizes[idx]  = armThickness * tipFade + 0.4;
       }
     }
 
@@ -725,9 +727,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
           const dist = OUTER_RADIUS + progress * base.length;
           const warp = time * 0.8 + t * 1.3;
           const ns = 0.04;
-          const dx = simplex3(base.nx * dist * ns + warp, base.ny * dist * ns + 100, base.nz * dist * ns) * 45 * progress;
-          const dy = simplex3(base.nx * dist * ns + 200, base.ny * dist * ns + warp, base.nz * dist * ns) * 45 * progress;
-          const dz = simplex3(base.nx * dist * ns, base.ny * dist * ns + 300, base.nz * dist * ns + warp) * 45 * progress;
+          const dx = simplex3(base.nx * dist * ns + warp, base.ny * dist * ns + 100, base.nz * dist * ns) * 80 * progress;
+          const dy = simplex3(base.nx * dist * ns + 200, base.ny * dist * ns + warp, base.nz * dist * ns) * 80 * progress;
+          const dz = simplex3(base.nx * dist * ns, base.ny * dist * ns + 300, base.nz * dist * ns + warp) * 80 * progress;
           tPos[idx * 3]     = base.nx * dist + dx;
           tPos[idx * 3 + 1] = base.ny * dist + dy;
           tPos[idx * 3 + 2] = base.nz * dist + dz;
