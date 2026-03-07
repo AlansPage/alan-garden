@@ -116,9 +116,14 @@ const SPHERE_FRAG = /* glsl */ `
   varying float vAlpha;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    float alpha = max(0.0, 1.0 - d * 2.2);
-    alpha = pow(alpha, 1.4);
-    gl_FragColor = vec4(vColor * uCoreBrightness, alpha * vAlpha);
+    if (d > 0.5) discard;
+    // Hard bright center, tight falloff — crystal not dust
+    float alpha = 1.0 - smoothstep(0.0, 0.5, d);
+    alpha = pow(alpha, 0.55);  // <1.0 = more area stays bright
+    // Bright core highlight: center 20% is near-white
+    float core = max(0.0, 1.0 - d * 8.0);
+    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.6);
+    gl_FragColor = vec4(lit, alpha * vAlpha);
   }
 `;
 
@@ -293,9 +298,22 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       outerColors[i * 3]     = col[0];
       outerColors[i * 3 + 1] = col[1];
       outerColors[i * 3 + 2] = col[2];
-      // Uniform small particles — density creates the texture
-      outerAlphas[i] = 0.32 + Math.random() * 0.18;
-      outerSizes[i]  = 0.7 + Math.random() * 0.6;
+      // Particles furthest from surface = biggest/brightest
+      // They are the "note particles" — distinct, countable
+      const t = Math.max(0, (r - (OUTER_RADIUS - 30)) / 75);
+      if (t > 0.6) {
+        // Outermost spike tips: large bright anchor points
+        outerAlphas[i] = 0.7 + Math.random() * 0.25;
+        outerSizes[i]  = 4.0 + Math.random() * 4.0; // 4–8px
+      } else if (t > 0.2) {
+        // Mid-shell: medium bright particles
+        outerAlphas[i] = 0.5 + Math.random() * 0.2;
+        outerSizes[i]  = 2.5 + Math.random() * 2.0; // 2.5–4.5px
+      } else {
+        // Base shell: smaller, denser fill
+        outerAlphas[i] = 0.35;
+        outerSizes[i]  = 1.4 + Math.random() * 1.0; // 1.4–2.4px
+      }
     }
 
     const outerGeo = new BufferGeometry();
@@ -345,7 +363,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     let innerPlaced = 0;
     let innerAttempts = 0;
-    while (innerPlaced < INNER_COUNT && innerAttempts < INNER_COUNT * 8) {
+    while (innerPlaced < INNER_COUNT && innerAttempts < INNER_COUNT * 12) {
       innerAttempts++;
       const r = OUTER_RADIUS * Math.pow(Math.random(), 0.4);
       const theta = Math.random() * Math.PI * 2;
@@ -381,9 +399,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       let alpha: number;
       let size: number;
 
-      if (r > 160) {
-        // Outer inner ring: cold blue, fading into outer shell
-        col = lerpColor(colInnerBlue, colDeepBlue, (r - 160) / 60);
+      if (r > 130 && r < 200) {
+        // Dark moat — only keep 12% of particles here
+        if (Math.random() > 0.12) continue;
+        col = colDeepBlue;
+        alpha = 0.15;
+        size = 0.8;
+      } else if (r > 200) {
+        col = lerpColor(colInnerBlue, colDeepBlue, (r - 200) / 60);
         alpha = 0.22;
         size = 0.9;
       } else if (r > 90) {
