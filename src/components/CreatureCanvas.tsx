@@ -245,9 +245,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.75,
+      0.85,
       0.35,
-      0.42
+      0.38
     );
     composer.addPass(bloomPass);
 
@@ -263,9 +263,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const outerAlphas = new Float32Array(OUTER_COUNT);
     const outerSizes = new Float32Array(OUTER_COUNT);
 
-    const colPaleBW = hexToRgb("#c8d8ff");
-    const colMedBlue = hexToRgb("#6a9fff");
-    const colDeepBlue = hexToRgb("#2a5fd4");
+    const colPaleBW = hexToRgb("#ddeeff");     // colder white-blue
+    const colMedBlue = hexToRgb("#4488ff");    // electric mid blue
+    const colDeepBlue = hexToRgb("#1133bb");   // deep navy
 
     for (let i = 0; i < OUTER_COUNT; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -293,8 +293,17 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       outerColors[i * 3] = col[0];
       outerColors[i * 3 + 1] = col[1];
       outerColors[i * 3 + 2] = col[2];
-      outerAlphas[i] = 0.22;
-      outerSizes[i] = 1.1;
+      // Particles far out from the noise spikes = the "note particles"
+      // Give them more size variance and slightly higher base alpha
+      const distFromSurface = r - OUTER_RADIUS;
+      if (distFromSurface > 30) {
+        // Spiked-out particles: these are the "note" particles
+        outerAlphas[i] = 0.35 + Math.random() * 0.25;
+        outerSizes[i] = 1.2 + Math.random() * 1.8;  // range 1.2–3.0px
+      } else {
+        outerAlphas[i] = 0.18;
+        outerSizes[i] = 0.9;
+      }
     }
 
     const outerGeo = new BufferGeometry();
@@ -325,9 +334,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const innerAlphas = new Float32Array(INNER_COUNT);
     const innerSizes = new Float32Array(INNER_COUNT);
 
-    const colInnerBlue = hexToRgb("#3a6fd4");
-    const colOrange = hexToRgb("#ff6b35");
-    const colRed = hexToRgb("#ff2800");
+    const colInnerBlue = hexToRgb("#2244aa");    // deep cold blue outer ring
+    const colOrange = hexToRgb("#ff4400");       // burning orange mid
+    const colRed = hexToRgb("#ffffff");          // WHITE-HOT dead center
 
     for (let i = 0; i < INNER_COUNT; i++) {
       const r = OUTER_RADIUS * Math.pow(Math.random(), 0.35);
@@ -397,11 +406,13 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     glowCanvas.height = 128;
     const ctx = glowCanvas.getContext("2d")!;
     const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, "rgba(255, 255, 220, 1.0)");
-    gradient.addColorStop(0.2, "rgba(255, 80, 0, 0.9)");
-    gradient.addColorStop(0.45, "rgba(200, 10, 0, 0.5)");
-    gradient.addColorStop(0.7, "rgba(80, 0, 0, 0.15)");
-    gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+    gradient.addColorStop(0,    "rgba(255, 255, 255, 1.0)");  // blinding white
+    gradient.addColorStop(0.08, "rgba(255, 200, 80, 1.0)");   // sear yellow
+    gradient.addColorStop(0.2,  "rgba(255, 40, 0, 0.95)");    // violent red
+    gradient.addColorStop(0.38, "rgba(180, 0, 80, 0.7)");     // deep magenta-red
+    gradient.addColorStop(0.55, "rgba(60, 0, 40, 0.35)");     // dark violet
+    gradient.addColorStop(0.75, "rgba(10, 0, 10, 0.1)");
+    gradient.addColorStop(1,    "rgba(0, 0, 0, 0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 128, 128);
 

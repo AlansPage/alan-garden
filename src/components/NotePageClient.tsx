@@ -143,7 +143,7 @@ export default function NotePageClient({
       const limit = Math.floor(spans.length * 0.35);
       return {
         spans,
-        left: 0,
+        left: Math.floor(spans.length * 0.3),   // never eat the first 30%
         right: spans.length - 1,
         limit,
         consumed: 0,
