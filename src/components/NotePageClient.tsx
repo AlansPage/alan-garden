@@ -105,12 +105,19 @@ export default function NotePageClient({
       const text = textNode.nodeValue ?? "";
       const frag = document.createDocumentFragment();
       for (let i = 0; i < text.length; i++) {
-        const span = document.createElement("span");
-        span.className = "char";
-        span.dataset.charIndex = String(index++);
-        span.style.display = "inline-block";
-        span.textContent = text[i];
-        frag.appendChild(span);
+        const ch = text[i];
+        if (ch === ' ' || ch === '\n' || ch === '\t') {
+          // Whitespace must NOT be wrapped in inline-block spans
+          // or browsers collapse the space to zero width
+          frag.appendChild(document.createTextNode(ch));
+        } else {
+          const span = document.createElement("span");
+          span.className = "char";
+          span.dataset.charIndex = String(index++);
+          span.style.display = "inline-block";
+          span.textContent = ch;
+          frag.appendChild(span);
+        }
       }
       if (textNode.parentNode) {
         textNode.parentNode.replaceChild(frag, textNode);
@@ -211,6 +218,11 @@ export default function NotePageClient({
   return (
     <div className="note-page-root" ref={rootRef}>
       <header className="note-header">
+        <div className="note-back-row">
+          <Link href="/" className="note-back-link">
+            ← VOID
+          </Link>
+        </div>
         <div className="note-title-row">
           <span className={`note-status-dot status-${status}`} />
           <h1 className="note-title">{title}</h1>

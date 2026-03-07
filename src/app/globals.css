@@ -263,6 +263,23 @@ canvas.creature-canvas {
   margin-bottom: 40px;
 }
 
+.note-back-row {
+  margin-bottom: 24px;
+}
+
+.note-back-link {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.note-back-link:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .note-title-row {
   display: flex;
   align-items: center;
