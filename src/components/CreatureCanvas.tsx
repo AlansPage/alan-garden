@@ -301,17 +301,17 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       // They are the "note particles" — distinct, countable
       const t = Math.max(0, (r - (OUTER_RADIUS - 30)) / 75);
       if (t > 0.6) {
-        // Outermost spike tips — large, countable, star-like
-        outerAlphas[i] = 0.60 + Math.random() * 0.25; // 0.60–0.85
-        outerSizes[i]  = 4.5 + Math.random() * 3.0;   // 4.5–7.5px
+        // Outermost spike tips — large, countable, blue stars
+        outerAlphas[i] = 0.28 + Math.random() * 0.16; // 0.28–0.44
+        outerSizes[i]  = 3.5 + Math.random() * 2.5;   // 3.5–6px
       } else if (t > 0.2) {
-        // Mid-shell — dense visible blue points
-        outerAlphas[i] = 0.40 + Math.random() * 0.18; // 0.40–0.58
-        outerSizes[i]  = 2.5 + Math.random() * 2.0;   // 2.5–4.5px
+        // Mid-shell — visible blue points
+        outerAlphas[i] = 0.14 + Math.random() * 0.10; // 0.14–0.24
+        outerSizes[i]  = 2.0 + Math.random() * 1.5;   // 2.0–3.5px
       } else {
-        // Base shell — smaller but still legible
-        outerAlphas[i] = 0.22 + Math.random() * 0.12; // 0.22–0.34
-        outerSizes[i]  = 1.5 + Math.random() * 1.0;   // 1.5–2.5px
+        // Base shell — fine texture
+        outerAlphas[i] = 0.06 + Math.random() * 0.06; // 0.06–0.12
+        outerSizes[i]  = 1.0 + Math.random() * 0.8;   // 1.0–1.8px
       }
     }
 
@@ -373,7 +373,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       const i = innerPlaced;
 
       // Carve dark petal voids in the mid-shell region (r 80–200)
-      if (r > 80 && r < 200) {
+      if (r > 45 && r < 85) {
         let inPetalVoid = false;
         for (const axis of petalAxes) {
           // Dot product = angular alignment with petal axis
@@ -398,36 +398,30 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       let alpha: number;
       let size: number;
 
-      if (r > 130 && r < 200) {
-        // Dark moat — only keep 12% of particles here
-        if (Math.random() > 0.04) continue;
+      if (r > 85) {
+        // Terrifying dark moat — nearly empty, creates the stark black ring
+        if (Math.random() > 0.03) continue;
         col = colDeepBlue;
-        alpha = 0.15;
-        size = 0.8;
-      } else if (r > 200) {
-        col = lerpColor(colInnerBlue, colMedBlue, (r - 200) / 60);
-        alpha = 0.55 + Math.random() * 0.20;  // bright blue bridge ring
-        size = 3.0 + Math.random() * 2.5;     // 3–5.5px — large, visible
-      } else if (r > 90) {
-        // Mid ring: deep blue, structured
-        col = colInnerBlue;
-        alpha = 0.38;
-        size = 1.1;
+        alpha = 0.06;
+        size = 0.6;
       } else if (r > 45) {
-        // Transition to hot core: blue → orange
-        col = lerpColor(colOrange, colInnerBlue, (r - 45) / 45);
+        // Transition zone: orange→blue ring around core
+        // Screen-space clear: reject particles projecting onto core center
+        const screenR2 = (nx * nx + ny * ny) * r * r;
+        if (screenR2 < 55 * 55) continue;
+        col = lerpColor(colOrange, colInnerBlue, (r - 45) / 40);
         alpha = 0.55;
-        size = 1.4;
+        size = 1.6;
       } else if (r > 18) {
-        // Inner hot zone: orange
+        // Hot orange zone
         col = colOrange;
-        alpha = 0.75;
-        size = 2.0;
+        alpha = 0.82;
+        size = 2.8;
       } else {
-        // Dead center: WHITE-HOT burning point, very dense
-        col = colRed;  // #ffffff
-        alpha = 0.95;
-        size = 3.2;
+        // Dead center: burning orange core
+        col = colRed;
+        alpha = 0.98;
+        size = 5.0;
       }
 
       innerColors[i * 3]     = col[0];
@@ -484,7 +478,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       depthWrite: false,
     });
     const glowSprite = new Sprite(glowMat);
-    glowSprite.scale.set(90, 90, 1);
+    glowSprite.scale.set(200, 200, 1);
     glowSprite.position.set(0, 0, 1);
     sphereGroup.add(glowSprite);
 
@@ -663,7 +657,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       coreBrightness += (coreBrightnessTarget - coreBrightness) * brightnessLerp;
       innerMat.uniforms.uCoreBrightness.value = coreBrightness;
       // Pulse sprite scale with brightness
-      const spriteScale = 90 * (0.7 + 0.5 * coreBrightness);
+      const spriteScale = 200 * (0.7 + 0.5 * coreBrightness);
       glowSprite.scale.set(spriteScale, spriteScale, 1);
 
       // ── Part D: Global dim (search overlay) ────────────────────────────────
