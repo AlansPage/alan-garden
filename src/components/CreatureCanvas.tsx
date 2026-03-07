@@ -249,9 +249,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.25,
+      0.45,
       0.5,
-      0.7
+      0.5
     );
     composer.addPass(bloomPass);
 
@@ -301,17 +301,17 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       // They are the "note particles" — distinct, countable
       const t = Math.max(0, (r - (OUTER_RADIUS - 30)) / 75);
       if (t > 0.6) {
-        // Outermost tips: readable individual points, not merging to white
-        outerAlphas[i] = 0.18 + Math.random() * 0.12; // 0.18–0.30
-        outerSizes[i]  = 2.0 + Math.random() * 2.0;   // 2–4px
+        // Outermost spike tips — large, countable, star-like
+        outerAlphas[i] = 0.60 + Math.random() * 0.25; // 0.60–0.85
+        outerSizes[i]  = 4.5 + Math.random() * 3.0;   // 4.5–7.5px
       } else if (t > 0.2) {
-        // Mid-shell: dimmer fill
-        outerAlphas[i] = 0.10 + Math.random() * 0.08; // 0.10–0.18
-        outerSizes[i]  = 1.2 + Math.random() * 1.2;   // 1.2–2.4px
+        // Mid-shell — dense visible blue points
+        outerAlphas[i] = 0.40 + Math.random() * 0.18; // 0.40–0.58
+        outerSizes[i]  = 2.5 + Math.random() * 2.0;   // 2.5–4.5px
       } else {
-        // Base shell: very dim, dense texture
-        outerAlphas[i] = 0.05 + Math.random() * 0.04; // 0.05–0.09
-        outerSizes[i]  = 0.8 + Math.random() * 0.6;   // 0.8–1.4px
+        // Base shell — smaller but still legible
+        outerAlphas[i] = 0.22 + Math.random() * 0.12; // 0.22–0.34
+        outerSizes[i]  = 1.5 + Math.random() * 1.0;   // 1.5–2.5px
       }
     }
 
@@ -345,7 +345,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const colInnerBlue = hexToRgb("#2244aa");    // deep cold blue outer ring
     const colOrange = hexToRgb("#ff4400");       // burning orange mid
-    const colRed = hexToRgb("#ffffff");          // WHITE-HOT dead center
+    const colRed = hexToRgb("#ff5500");          // burning orange core
 
     // Petal void axes — 6 directions that carve dark claws
     const PETAL_COUNT = 6;
@@ -400,14 +400,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
       if (r > 130 && r < 200) {
         // Dark moat — only keep 12% of particles here
-        if (Math.random() > 0.12) continue;
+        if (Math.random() > 0.04) continue;
         col = colDeepBlue;
         alpha = 0.15;
         size = 0.8;
       } else if (r > 200) {
-        col = lerpColor(colInnerBlue, colDeepBlue, (r - 200) / 60);
-        alpha = 0.22;
-        size = 0.9;
+        col = lerpColor(colInnerBlue, colMedBlue, (r - 200) / 60);
+        alpha = 0.55 + Math.random() * 0.20;  // bright blue bridge ring
+        size = 3.0 + Math.random() * 2.5;     // 3–5.5px — large, visible
       } else if (r > 90) {
         // Mid ring: deep blue, structured
         col = colInnerBlue;

@@ -90,17 +90,11 @@ export function TransitionProvider({
     zIndex: 50,
     background: "#000000",
     pointerEvents: isIdle ? "none" : "all",
-    opacity: isExpanding ? 1 : isFading ? 0 : 0,
-    clipPath: isExpanding
-      ? `circle(200vmax at ${overlay.x}px ${overlay.y}px)`
-      : isFading
+    opacity: isExpanding ? 1 : 0,
+    clipPath: isExpanding || isFading
       ? `circle(200vmax at ${overlay.x}px ${overlay.y}px)`
       : `circle(0px at ${overlay.x}px ${overlay.y}px)`,
-    transition: isExpanding
-      ? "clip-path 420ms cubic-bezier(0.4,0,0.2,1), opacity 420ms ease"
-      : isFading
-      ? "opacity 300ms ease"
-      : "none",
+    transition: "clip-path 420ms cubic-bezier(0.4,0,0.2,1), opacity 420ms ease",
   };
 
   return (
