@@ -119,10 +119,9 @@ const SPHERE_FRAG = /* glsl */ `
     if (d > 0.5) discard;
     // Hard bright center, tight falloff — crystal not dust
     float alpha = 1.0 - smoothstep(0.0, 0.5, d);
-    alpha = pow(alpha, 0.55);  // <1.0 = more area stays bright
-    // Bright core highlight: center 20% is near-white
+    alpha = pow(alpha, 2.5);          // tight dim point, not a fat disc
     float core = max(0.0, 1.0 - d * 8.0);
-    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.6);
+    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.1);
     gl_FragColor = vec4(lit, alpha * vAlpha);
   }
 `;
@@ -250,9 +249,9 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     composer.addPass(new RenderPass(scene, camera));
     const bloomPass = new UnrealBloomPass(
       new Vector2(width, height),
-      0.65,
       0.25,
-      0.45
+      0.5,
+      0.7
     );
     composer.addPass(bloomPass);
 
@@ -302,17 +301,17 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       // They are the "note particles" — distinct, countable
       const t = Math.max(0, (r - (OUTER_RADIUS - 30)) / 75);
       if (t > 0.6) {
-        // Outermost spike tips: large bright anchor points
-        outerAlphas[i] = 0.7 + Math.random() * 0.25;
-        outerSizes[i]  = 4.0 + Math.random() * 4.0; // 4–8px
+        // Outermost tips: readable individual points, not merging to white
+        outerAlphas[i] = 0.18 + Math.random() * 0.12; // 0.18–0.30
+        outerSizes[i]  = 2.0 + Math.random() * 2.0;   // 2–4px
       } else if (t > 0.2) {
-        // Mid-shell: medium bright particles
-        outerAlphas[i] = 0.5 + Math.random() * 0.2;
-        outerSizes[i]  = 2.5 + Math.random() * 2.0; // 2.5–4.5px
+        // Mid-shell: dimmer fill
+        outerAlphas[i] = 0.10 + Math.random() * 0.08; // 0.10–0.18
+        outerSizes[i]  = 1.2 + Math.random() * 1.2;   // 1.2–2.4px
       } else {
-        // Base shell: smaller, denser fill
-        outerAlphas[i] = 0.35;
-        outerSizes[i]  = 1.4 + Math.random() * 1.0; // 1.4–2.4px
+        // Base shell: very dim, dense texture
+        outerAlphas[i] = 0.05 + Math.random() * 0.04; // 0.05–0.09
+        outerSizes[i]  = 0.8 + Math.random() * 0.6;   // 0.8–1.4px
       }
     }
 
@@ -655,8 +654,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       tendrilMat.uniforms.breathe.value = breathe;
 
       // ── Rotation ───────────────────────────────────────────────────────────
-      sphereGroup.rotation.y += 0.0006;
-      sphereGroup.rotation.x += 0.00015;
+      sphereGroup.rotation.y += 0.00018;
+      sphereGroup.rotation.x += 0;
 
       // ── Part C: Core brightness (feeding response) ─────────────────────────
       // Ramp up fast (40 frames), decay slow (120 frames)
