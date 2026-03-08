@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
 :root {
   --background: #000000;
@@ -16,8 +17,10 @@ body {
 }
 
 body.garden-body {
-  font-family: var(--font-plex-mono), "IBM Plex Mono", system-ui, -apple-system,
+  font-family: "Press Start 2P", var(--font-plex-mono), "IBM Plex Mono", system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", monospace;
+  image-rendering: pixelated;
+  -ms-interpolation-mode: nearest-neighbor;
 }
 
 * {
@@ -49,8 +52,8 @@ canvas.creature-canvas {
 }
 
 .site-id-label {
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 8px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
@@ -58,8 +61,9 @@ canvas.creature-canvas {
 .site-id-line {
   margin-top: 8px;
   width: 40px;
-  height: 1px;
+  height: 2px;
   background-color: #e8ff00;
+  image-rendering: pixelated;
 }
 
 .home-center {
@@ -81,10 +85,11 @@ canvas.creature-canvas {
   width: 100%;
   max-width: 560px;
   height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 0;
   background: #000000;
   padding: 0 14px;
+  box-shadow: 4px 4px 0 rgba(232, 255, 0, 0.15);
 }
 
 .home-search-icon {
@@ -99,7 +104,7 @@ canvas.creature-canvas {
   outline: none;
   background: transparent;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 10px;
   font-family: inherit;
 }
 
@@ -119,10 +124,10 @@ canvas.creature-canvas {
   align-items: center;
   justify-content: center;
   min-width: 18px;
-  padding: 1px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 4px;
-  font-size: 10px;
+  padding: 2px 4px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 0;
+  font-size: 8px;
   color: rgba(255, 255, 255, 0.5);
 }
 
@@ -131,8 +136,8 @@ canvas.creature-canvas {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
-  letter-spacing: 0.15em;
+  font-size: 8px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.6);
 }
@@ -154,8 +159,8 @@ canvas.creature-canvas {
 
 .home-status {
   margin-top: 80px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.25);
 }
@@ -180,13 +185,15 @@ canvas.creature-canvas {
 .search-input {
   width: 100%;
   height: 52px;
-  border: 1px solid #e8ff00;
+  border: 2px solid #e8ff00;
+  border-radius: 0;
   background: transparent;
   color: #ffffff;
   font-family: inherit;
-  font-size: 20px;
+  font-size: 12px;
   padding: 0 14px;
   outline: none;
+  box-shadow: 4px 4px 0 rgba(232, 255, 0, 0.2);
 }
 
 .search-input::placeholder {
@@ -214,7 +221,7 @@ canvas.creature-canvas {
 }
 
 .search-result-title {
-  font-size: 14px;
+  font-size: 9px;
   color: #ffffff;
 }
 
@@ -223,13 +230,14 @@ canvas.creature-canvas {
 }
 
 .search-result-type {
-  font-size: 10px;
+  font-size: 7px;
   color: #e8ff00;
 }
 
 .search-result-excerpt {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 8px;
+  line-height: 1.8;
   color: rgba(255, 255, 255, 0.5);
 }
 
@@ -268,8 +276,8 @@ canvas.creature-canvas {
 }
 
 .note-back-link {
-  font-size: 10px;
-  letter-spacing: 0.18em;
+  font-size: 7px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.3);
   text-decoration: none;
@@ -290,7 +298,7 @@ canvas.creature-canvas {
 .note-status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: 0;
   display: inline-block;
 }
 
@@ -307,10 +315,11 @@ canvas.creature-canvas {
 }
 
 .note-title {
-  font-size: 32px;
+  font-size: 16px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   margin: 0;
+  line-height: 1.6;
 }
 
 .note-meta-row {
@@ -318,7 +327,7 @@ canvas.creature-canvas {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 12px;
-  font-size: 11px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.4);
 }
 
@@ -340,7 +349,7 @@ canvas.creature-canvas {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 11px;
+  font-size: 7px;
 }
 
 .note-tag {
@@ -348,8 +357,8 @@ canvas.creature-canvas {
 }
 
 .note-body {
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 9px;
+  line-height: 2.0;
 }
 
 .note-body p {
@@ -401,8 +410,8 @@ canvas.creature-canvas {
 }
 
 .note-backlinks-label {
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 16px;
@@ -420,12 +429,13 @@ canvas.creature-canvas {
 }
 
 .note-backlink-title {
-  font-size: 14px;
+  font-size: 9px;
   margin-bottom: 4px;
 }
 
 .note-backlink-excerpt {
-  font-size: 12px;
+  font-size: 8px;
+  line-height: 1.8;
   color: rgba(255, 255, 255, 0.7);
 }
 
@@ -455,7 +465,7 @@ canvas.creature-canvas {
   width: 380px;
   height: 100vh;
   background: #000000;
-  border-left: 1px solid #ffffff;
+  border-left: 2px solid #ffffff;
   z-index: 20;
   opacity: 0;
   animation: graph-panel-fade-in 0.15s ease-out forwards;
@@ -476,25 +486,28 @@ canvas.creature-canvas {
 }
 
 .graph-panel-title {
-  font-size: 16px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   margin: 0;
+  line-height: 1.6;
 }
 
 .graph-panel-excerpt {
-  font-size: 12px;
+  font-size: 8px;
+  line-height: 1.8;
   color: rgba(255, 255, 255, 0.8);
 }
 
 .graph-panel-backlinks {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 7px;
+  line-height: 1.8;
 }
 
 .graph-panel-backlinks-label {
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 6px;
@@ -515,8 +528,8 @@ canvas.creature-canvas {
 }
 
 .graph-panel-link {
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-size: 8px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #e8ff00;
   text-decoration: none;
@@ -537,9 +550,9 @@ canvas.creature-canvas {
   bottom: 28px;
   left: 28px;
   z-index: 20;
-  font-size: 10px;
-  font-family: var(--font-plex-mono), "IBM Plex Mono", monospace;
-  letter-spacing: 0.12em;
+  font-size: 7px;
+  font-family: "Press Start 2P", var(--font-plex-mono), "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.25);
   text-decoration: none;
@@ -557,8 +570,8 @@ canvas.creature-canvas {
   bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 11px;
-  letter-spacing: 0.2em;
+  font-size: 8px;
+  letter-spacing: 0.12em;
   color: rgba(232, 255, 0, 0.7);
   z-index: 20;
   animation: pulse-text 0.8s ease-in-out infinite;
@@ -576,8 +589,8 @@ canvas.creature-canvas {
   display: flex;
   align-items: center;
   gap: 20px;
-  font-size: 10px;
-  letter-spacing: 0.15em;
+  font-size: 7px;
+  letter-spacing: 0.1em;
   z-index: 20;
 }
 
@@ -611,15 +624,15 @@ canvas.creature-canvas {
 }
 
 .listing-section-label {
-  font-size: 10px;
-  letter-spacing: 0.25em;
+  font-size: 8px;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.3);
 }
 
 .listing-section-rule {
   width: 40px;
-  height: 1px;
+  height: 2px;
   background-color: #e8ff00;
   margin-top: 8px;
   margin-bottom: 48px;
@@ -659,10 +672,10 @@ canvas.creature-canvas {
 }
 
 .listing-dot {
-  width: 10px;
-  height: 10px;
-  min-width: 10px;
-  border-radius: 999px;
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 0;
   flex-shrink: 0;
   display: inline-block;
 }
@@ -680,10 +693,10 @@ canvas.creature-canvas {
 }
 
 .listing-title {
-  font-size: 20px;
+  font-size: 11px;
   color: #ffffff;
   letter-spacing: 0.04em;
-  line-height: 1.3;
+  line-height: 1.6;
   transition: color 0.15s ease;
 }
 
@@ -692,19 +705,19 @@ canvas.creature-canvas {
 }
 
 .listing-meta {
-  font-size: 10px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.3);
   margin-top: 6px;
   margin-left: 18px;
 }
 
 .listing-excerpt {
-  font-size: 13px;
+  font-size: 8px;
   color: rgba(255, 255, 255, 0.5);
   margin-top: 8px;
   margin-left: 18px;
-  line-height: 1.6;
-  max-height: 3.2em;
+  line-height: 1.9;
+  max-height: 3.8em;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -720,39 +733,40 @@ canvas.creature-canvas {
 }
 
 .listing-tag {
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   color: #e8ff00;
 }
 
 /* ── Essay readability ──────────────────────────────────────────────────── */
 
 .essay-body {
-  font-size: 15px;
-  line-height: 1.85;
+  font-size: 9px;
+  line-height: 2.2;
 }
 
 .essay-body h1 {
-  font-size: 24px;
-  letter-spacing: 0.06em;
+  font-size: 14px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   margin: 3em 0 1em;
   color: #ffffff;
+  line-height: 1.8;
 }
 
 .essay-body h2 {
-  font-size: 13px;
-  letter-spacing: 0.18em;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
   margin: 3em 0 1.2em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 0.6em;
 }
 
 .essay-body h3 {
-  font-size: 11px;
-  letter-spacing: 0.15em;
+  font-size: 8px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #e8ff00;
   margin: 2.5em 0 0.8em;
@@ -780,7 +794,7 @@ canvas.creature-canvas {
 .essay-body ul,
 .essay-body ol {
   padding-left: 1.5em;
-  font-size: 13px;
+  font-size: 8px;
   color: rgba(255, 255, 255, 0.6);
-  line-height: 1.9;
+  line-height: 2.2;
 }

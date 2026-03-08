@@ -2,31 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import {
-  AdditiveBlending,
-  BufferAttribute,
-  BufferGeometry,
-  Color,
-  Group,
-  Mesh,
-  MeshBasicMaterial,
-  PerspectiveCamera,
-  Points,
-  Raycaster,
-  Scene,
-  ShaderMaterial,
-  SphereGeometry,
-  Vector2,
-  Vector3,
-  WebGLRenderer,
-} from "three";
 import type { GraphData } from "@/lib/vault";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function gauss(sigma: number): number {
-  let u = 0,
-    v = 0;
+  let u = 0, v = 0;
   while (u === 0) u = Math.random();
   while (v === 0) v = Math.random();
   return sigma * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
@@ -45,14 +26,14 @@ const STATUS_COLORS: Record<string, string> = {
   evergreen: "#00FFD1",
 };
 
-function nodeColor(status: string, type: string, tags: string[]): Color {
-  if (type === "essay") return new Color("#E8FF00");
+function nodeColor(status: string, type: string, tags: string[]): string {
+  if (type === "essay") return "#E8FF00";
   if (tags.length > 0) {
     const tag = tags[0];
     const hash = tag.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    return new Color(TAG_COLORS[hash % TAG_COLORS.length]);
+    return TAG_COLORS[hash % TAG_COLORS.length];
   }
-  return new Color(STATUS_COLORS[status] ?? "#5B6FD4");
+  return STATUS_COLORS[status] ?? "#5B6FD4";
 }
 
 function nodeRadius(backlinkCount: number): number {
@@ -63,41 +44,14 @@ function nodeRadius(backlinkCount: number): number {
   return 22;
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const v = parseInt(hex.replace("#", ""), 16);
+  return [(v >> 16) & 0xff, ((v >> 8) & 0xff), (v & 0xff)];
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CAM_Z = 900;
-const FOV_DEG = 45;
-const PARTICLES_PER_EDGE = 60;
-
-// ── Particle shaders ──────────────────────────────────────────────────────────
-
-const PARTICLE_VERT = `
-  attribute float aSize;
-  attribute float aAlpha;
-  attribute vec3 aColor;
-  varying float vAlpha;
-  varying vec3 vColor;
-
-  void main() {
-    vAlpha = aAlpha;
-    vColor = aColor;
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = aSize;
-    gl_Position = projectionMatrix * mvPosition;
-  }
-`;
-
-const PARTICLE_FRAG = `
-  varying float vAlpha;
-  varying vec3 vColor;
-
-  void main() {
-    float d = length(gl_PointCoord - vec2(0.5)) * 2.0;
-    if (d > 1.0) discard;
-    float fade = 1.0 - smoothstep(0.4, 1.0, d);
-    gl_FragColor = vec4(vColor * vAlpha * fade, 1.0);
-  }
-`;
+const PIXEL = 3; // Pixel size for chunky retro look
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -111,11 +65,14 @@ interface GraphCanvasProps {
 interface NodeVisual {
   slug: string;
   title: string;
-  mesh: Mesh; // invisible sphere, raycasting only
-  baseColor: Color;
-  position: Vector3;
-  previous: Vector3;
-  acceleration: Vector3;
+  color: string;
+  colorRgb: [number, number, number];
+  x: number;
+  y: number;
+  prevX: number;
+  prevY: number;
+  ax: number;
+  ay: number;
   radius: number;
   idx: number;
   status: string;
@@ -135,7 +92,7 @@ export default function GraphCanvas({
   onSelectNode,
   isLinkHovered: _isLinkHovered,
 }: GraphCanvasProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const inputRef = useRef<HTMLDivElement | null>(null);
 
   const onSelectRef = useRef(onSelectNode);
@@ -144,59 +101,27 @@ export default function GraphCanvas({
   }, [onSelectNode]);
 
   useEffect(() => {
-    if (!containerRef.current || !inputRef.current) return;
+    const canvas = canvasRef.current;
+    const input = inputRef.current;
+    if (!canvas || !input) return;
 
-    // ── Three.js core ─────────────────────────────────────────────────────────
-
-    const scene = new Scene();
-    const renderer = new WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-    renderer.setClearColor(0x000000, 1);
-
-    const container = containerRef.current;
-    container.appendChild(renderer.domElement);
-    renderer.domElement.classList.add("creature-canvas");
-
+    const ctx = canvas.getContext("2d")!;
     let width = window.innerWidth;
     let height = window.innerHeight;
 
-    const camera = new PerspectiveCamera(FOV_DEG, width / height, 0.1, 5000);
-    camera.position.set(0, 0, CAM_Z);
+    const resize = () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width;
+      canvas.height = height;
+    };
+    resize();
 
-    const rootGroup = new Group();
-    scene.add(rootGroup);
-
-    // ── Label overlay (canvas 2D, hover-only) ─────────────────────────────────
-
-    const labelCanvas = document.createElement("canvas");
-    labelCanvas.style.cssText =
-      "position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:15;pointer-events:none";
-    document.body.appendChild(labelCanvas);
-    const labelCtx = labelCanvas.getContext("2d")!;
-
-    function resizeLabelCanvas() {
-      labelCanvas.width = window.innerWidth * (window.devicePixelRatio || 1);
-      labelCanvas.height = window.innerHeight * (window.devicePixelRatio || 1);
-      labelCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
-    }
-    resizeLabelCanvas();
-
-    // ── Particle shader material (shared) ─────────────────────────────────────
-
-    const particleMat = new ShaderMaterial({
-      vertexShader: PARTICLE_VERT,
-      fragmentShader: PARTICLE_FRAG,
-      blending: AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-    });
-
-    // ── Nodes ─────────────────────────────────────────────────────────────────
+    // ── Build nodes ───────────────────────────────────────────────────────────
 
     const nodes: NodeVisual[] = [];
     const edgeInfos: EdgeInfo[] = [];
     const slugToIdx = new Map<string, number>();
-    const sphereGeo = new SphereGeometry(1, 12, 12);
 
     const connectionCount = new Map<string, number>();
     for (const e of graph.edges) {
@@ -204,51 +129,32 @@ export default function GraphCanvas({
       connectionCount.set(e.target, (connectionCount.get(e.target) ?? 0) + 1);
     }
 
-    const initPos = (type: string, status: string, i: number): Vector3 => {
-      if (type === "essay") {
-        return new Vector3(gauss(80), gauss(80), gauss(15));
-      }
-      if (status === "evergreen") {
-        return new Vector3(gauss(180), gauss(180), gauss(20));
-      }
-      if (status === "budding") {
-        return new Vector3(gauss(300), gauss(300), gauss(20));
-      }
-      const angle =
-        (i / Math.max(1, graph.nodes.length)) * Math.PI * 2 +
-        (Math.random() - 0.5) * 0.8;
-      const r = 400 + Math.random() * 200;
-      return new Vector3(
-        Math.cos(angle) * r,
-        Math.sin(angle) * r * 0.6,
-        (Math.random() - 0.5) * 40
-      );
-    };
-
     graph.nodes.forEach((node, i) => {
       const r = nodeRadius(node.backlinkCount);
-      const color = nodeColor(node.status, node.type, node.tags);
+      const col = nodeColor(node.status, node.type, node.tags);
 
-      // Invisible sphere — raycasting only, never renders
-      const mat = new MeshBasicMaterial({
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      });
-      const mesh = new Mesh(sphereGeo, mat);
-      const pos = initPos(node.type, node.status, i);
-      mesh.position.copy(pos);
-      mesh.scale.setScalar(r);
-      rootGroup.add(mesh);
+      let x: number, y: number;
+      if (node.type === "essay") {
+        x = gauss(80); y = gauss(80);
+      } else if (node.status === "evergreen") {
+        x = gauss(180); y = gauss(180);
+      } else if (node.status === "budding") {
+        x = gauss(300); y = gauss(300);
+      } else {
+        const angle = (i / Math.max(1, graph.nodes.length)) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+        const rad = 400 + Math.random() * 200;
+        x = Math.cos(angle) * rad;
+        y = Math.sin(angle) * rad * 0.6;
+      }
 
       nodes.push({
         slug: node.slug,
         title: node.title,
-        mesh,
-        baseColor: color.clone(),
-        position: pos.clone(),
-        previous: pos.clone(),
-        acceleration: new Vector3(),
+        color: col,
+        colorRgb: hexToRgb(col),
+        x, y,
+        prevX: x, prevY: y,
+        ax: 0, ay: 0,
         radius: r,
         idx: i,
         status: node.status,
@@ -257,13 +163,12 @@ export default function GraphCanvas({
       slugToIdx.set(node.slug, i);
     });
 
-    // ── Edge info ─────────────────────────────────────────────────────────────
+    // ── Build edges ───────────────────────────────────────────────────────────
 
     graph.edges.forEach((edge) => {
       const si = slugToIdx.get(edge.source);
       const ti = slugToIdx.get(edge.target);
       if (si === undefined || ti === undefined || si === ti) return;
-
       const srcConns = connectionCount.get(edge.source) ?? 0;
       const tgtConns = connectionCount.get(edge.target) ?? 0;
       edgeInfos.push({
@@ -273,264 +178,223 @@ export default function GraphCanvas({
       });
     });
 
-    // ── Edge particle system (single BufferGeometry for all edges) ────────────
+    // ── Camera ────────────────────────────────────────────────────────────────
 
-    const edgeParticleCount = edgeInfos.length * PARTICLES_PER_EDGE;
-    const edgePosArr = new Float32Array(edgeParticleCount * 3);
-    const edgeColArr = new Float32Array(edgeParticleCount * 3);
-    const edgeAlphaArr = new Float32Array(edgeParticleCount);
-    const edgeSizeArr = new Float32Array(edgeParticleCount).fill(1.5);
+    let camX = 0, camY = 0, camZoom = 1.0;
 
-    const edgeGeo = new BufferGeometry();
-    edgeGeo.setAttribute("position", new BufferAttribute(edgePosArr, 3));
-    edgeGeo.setAttribute("aColor", new BufferAttribute(edgeColArr, 3));
-    edgeGeo.setAttribute("aAlpha", new BufferAttribute(edgeAlphaArr, 1));
-    edgeGeo.setAttribute("aSize", new BufferAttribute(edgeSizeArr, 1));
+    const worldToScreen = (wx: number, wy: number): [number, number] => [
+      (wx - camX) * camZoom + width / 2,
+      (wy - camY) * camZoom + height / 2,
+    ];
 
-    const edgePoints = new Points(edgeGeo, particleMat);
-    rootGroup.add(edgePoints);
+    const screenToWorld = (sx: number, sy: number): [number, number] => [
+      (sx - width / 2) / camZoom + camX,
+      (sy - height / 2) / camZoom + camY,
+    ];
 
-    // Per-edge highlight factor: 0.25 base, 1.0 when connected to hovered node
-    const edgeHighlight = new Float32Array(edgeInfos.length).fill(0.25);
-
-    // Per-edge wobble seeds (pre-compute once, consistent per session)
-    const edgeWobbleX = new Float32Array(edgeInfos.length);
-    const edgeWobbleY = new Float32Array(edgeInfos.length);
-    for (let ei = 0; ei < edgeInfos.length; ei++) {
-      edgeWobbleX[ei] = Math.sin(ei * 7.3 + 1.4) * 8;
-      edgeWobbleY[ei] = Math.cos(ei * 3.1 + 2.7) * 8;
-    }
-
-    // ── Node particle system ──────────────────────────────────────────────────
-
-    const nodeParticleCount = nodes.length * 2; // core + halo per node
-    const nodePosArr = new Float32Array(nodeParticleCount * 3);
-    const nodeColArr = new Float32Array(nodeParticleCount * 3);
-    const nodeAlphaArr = new Float32Array(nodeParticleCount);
-    const nodeSizeArr = new Float32Array(nodeParticleCount);
-
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      const hi = nodes.length + i;
-      // Core
-      nodeSizeArr[i] = n.radius * 2.5;
-      nodeAlphaArr[i] = 0.9;
-      nodeColArr[i * 3 + 0] = n.baseColor.r;
-      nodeColArr[i * 3 + 1] = n.baseColor.g;
-      nodeColArr[i * 3 + 2] = n.baseColor.b;
-      // Halo
-      nodeSizeArr[hi] = Math.min(n.radius * 5.0, 60);
-      nodeAlphaArr[hi] = 0.25;
-      nodeColArr[hi * 3 + 0] = n.baseColor.r;
-      nodeColArr[hi * 3 + 1] = n.baseColor.g;
-      nodeColArr[hi * 3 + 2] = n.baseColor.b;
-    }
-
-    const nodeGeo = new BufferGeometry();
-    nodeGeo.setAttribute("position", new BufferAttribute(nodePosArr, 3));
-    nodeGeo.setAttribute("aColor", new BufferAttribute(nodeColArr, 3));
-    nodeGeo.setAttribute("aAlpha", new BufferAttribute(nodeAlphaArr, 1));
-    nodeGeo.setAttribute("aSize", new BufferAttribute(nodeSizeArr, 1));
-
-    const nodePoints = new Points(nodeGeo, particleMat);
-    rootGroup.add(nodePoints);
-
-    // ── Runtime state ─────────────────────────────────────────────────────────
-
-    const raycaster = new Raycaster();
-    const mouse = new Vector2(-9999, -9999);
-    const nodeMeshes = nodes.map((n) => n.mesh);
+    // ── State ─────────────────────────────────────────────────────────────────
 
     let hoveredIdx: number | null = null;
+    let mouseX = -9999, mouseY = -9999;
     let flash: { idx: number; frame: number } | null = null;
     let time = 0;
 
+    // Edge highlight
+    const edgeHighlight = new Float32Array(edgeInfos.length).fill(0.25);
+
     // ── Input ─────────────────────────────────────────────────────────────────
 
-    const input = inputRef.current!;
-
     const onPointerMove = (e: PointerEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      mouseX = e.clientX;
+      mouseY = e.clientY;
     };
 
     const onClick = (e: MouseEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      raycaster.setFromCamera(
-        new Vector2(
-          ((e.clientX - rect.left) / rect.width) * 2 - 1,
-          -((e.clientY - rect.top) / rect.height) * 2 + 1
-        ),
-        camera
-      );
-      const hits = raycaster.intersectObjects(nodeMeshes, false);
-      if (hits.length > 0) {
-        const idx = nodes.findIndex((n) => n.mesh === hits[0].object);
-        if (idx >= 0) {
-          flash = { idx, frame: 0 };
-          const slug = nodes[idx].slug;
-          setTimeout(() => onSelectRef.current(slug), 300);
-          return;
+      const [wx, wy] = screenToWorld(e.clientX, e.clientY);
+      // Find closest node within click radius
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const dx = n.x - wx;
+        const dy = n.y - wy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const hitR = Math.max(n.radius * 1.5, 12);
+        if (dist < hitR && dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
         }
       }
-      onSelectRef.current(null);
+      if (bestIdx >= 0) {
+        flash = { idx: bestIdx, frame: 0 };
+        const slug = nodes[bestIdx].slug;
+        setTimeout(() => onSelectRef.current(slug), 300);
+      } else {
+        onSelectRef.current(null);
+      }
+    };
+
+    // Pan & zoom
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0;
+    let panStartCamX = 0, panStartCamY = 0;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      isPanning = true;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panStartCamX = camX;
+      panStartCamY = camY;
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStartX;
+      const dy = e.clientY - panStartY;
+      camX = panStartCamX - dx / camZoom;
+      camY = panStartCamY - dy / camZoom;
+    };
+
+    const onMouseUp = () => { isPanning = false; };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      camZoom = Math.max(0.2, Math.min(5, camZoom * factor));
     };
 
     input.addEventListener("pointermove", onPointerMove);
     input.addEventListener("click", onClick);
+    input.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    input.addEventListener("wheel", onWheel, { passive: false });
+
+    // ── Pixel drawing helpers ─────────────────────────────────────────────────
+
+    const drawPixelRect = (x: number, y: number, w: number, h: number, color: string, alpha: number) => {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      // Snap to pixel grid
+      const sx = Math.round(x / PIXEL) * PIXEL;
+      const sy = Math.round(y / PIXEL) * PIXEL;
+      const sw = Math.max(PIXEL, Math.round(w / PIXEL) * PIXEL);
+      const sh = Math.max(PIXEL, Math.round(h / PIXEL) * PIXEL);
+      ctx.fillRect(sx, sy, sw, sh);
+    };
+
+    const drawPixelCircle = (cx: number, cy: number, radius: number, color: string, alpha: number) => {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      const r = Math.max(1, Math.round(radius / PIXEL));
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy <= r * r) {
+            ctx.fillRect(
+              Math.round(cx / PIXEL) * PIXEL + dx * PIXEL,
+              Math.round(cy / PIXEL) * PIXEL + dy * PIXEL,
+              PIXEL, PIXEL
+            );
+          }
+        }
+      }
+    };
+
+    // ── Bresenham pixelated line ───────────────────────────────────────────────
+
+    const drawPixelLine = (
+      x0: number, y0: number, x1: number, y1: number,
+      colSrc: [number, number, number], colTgt: [number, number, number],
+      alpha: number
+    ) => {
+      // Snap to pixel grid
+      let px0 = Math.round(x0 / PIXEL);
+      let py0 = Math.round(y0 / PIXEL);
+      const px1 = Math.round(x1 / PIXEL);
+      const py1 = Math.round(y1 / PIXEL);
+
+      const dx = Math.abs(px1 - px0);
+      const dy = Math.abs(py1 - py0);
+      const sx = px0 < px1 ? 1 : -1;
+      const sy = py0 < py1 ? 1 : -1;
+      let err = dx - dy;
+      const totalSteps = Math.max(dx, dy);
+      let step = 0;
+
+      ctx.globalAlpha = alpha;
+
+      while (true) {
+        const t = totalSteps > 0 ? step / totalSteps : 0;
+        const r = Math.round(colSrc[0] + (colTgt[0] - colSrc[0]) * t);
+        const g = Math.round(colSrc[1] + (colTgt[1] - colSrc[1]) * t);
+        const b = Math.round(colSrc[2] + (colTgt[2] - colSrc[2]) * t);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(px0 * PIXEL, py0 * PIXEL, PIXEL, PIXEL);
+
+        if (px0 === px1 && py0 === py1) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; px0 += sx; }
+        if (e2 < dx) { err += dx; py0 += sy; }
+        step++;
+        if (step > 2000) break; // safety
+      }
+    };
 
     // ── Force simulation ──────────────────────────────────────────────────────
 
     const simulate = () => {
-      for (const n of nodes) n.acceleration.set(0, 0, 0);
+      for (const n of nodes) { n.ax = 0; n.ay = 0; }
 
       // Repulsion
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i],
-            b = nodes[j];
-          const delta = new Vector3().subVectors(a.position, b.position);
-          const distSq = Math.max(50, delta.lengthSq());
-          delta.normalize().multiplyScalar(2520 / distSq);
-          a.acceleration.add(delta);
-          b.acceleration.sub(delta);
+          const a = nodes[i], b = nodes[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const distSq = Math.max(50, dx * dx + dy * dy);
+          const dist = Math.sqrt(distSq);
+          const force = 2520 / distSq;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          a.ax += fx; a.ay += fy;
+          b.ax -= fx; b.ay -= fy;
         }
       }
 
       // Link attraction
       for (const e of edgeInfos) {
-        const a = nodes[e.sourceIndex],
-          b = nodes[e.targetIndex];
-        const delta = new Vector3().subVectors(b.position, a.position);
-        const dist = Math.max(10, delta.length());
-        delta.normalize().multiplyScalar(0.01 * (dist - 165));
-        a.acceleration.add(delta);
-        b.acceleration.sub(delta);
+        const a = nodes[e.sourceIndex], b = nodes[e.targetIndex];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.max(10, Math.sqrt(dx * dx + dy * dy));
+        const force = 0.01 * (dist - 165);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        a.ax += fx; a.ay += fy;
+        b.ax -= fx; b.ay -= fy;
       }
 
       // Center gravity
       for (const n of nodes) {
-        n.acceleration.add(n.position.clone().multiplyScalar(-0.002));
+        n.ax -= n.x * 0.002;
+        n.ay -= n.y * 0.002;
       }
 
-      // Verlet integration + slow organic drift
+      // Verlet integration
       const dt2 = 0.016 * 0.016;
       for (const n of nodes) {
-        const cur = n.position.clone();
-        const vel = cur.clone().sub(n.previous).multiplyScalar(0.9);
-        n.position.copy(
-          cur.clone().add(vel).add(n.acceleration.clone().multiplyScalar(dt2))
-        );
-        // Slow per-node sine drift — barely perceptible, makes graph feel alive
-        n.position.x += Math.sin(time * 0.3 + n.idx * 1.7) * 0.08;
-        n.position.y += Math.cos(time * 0.25 + n.idx * 2.3) * 0.08;
-        n.previous.copy(cur);
-        // Keep invisible raycasting sphere in sync
-        n.mesh.position.copy(n.position);
+        const curX = n.x, curY = n.y;
+        const vx = (curX - n.prevX) * 0.9;
+        const vy = (curY - n.prevY) * 0.9;
+        n.x = curX + vx + n.ax * dt2;
+        n.y = curY + vy + n.ay * dt2;
+        // Subtle drift
+        n.x += Math.sin(time * 0.3 + n.idx * 1.7) * 0.08;
+        n.y += Math.cos(time * 0.25 + n.idx * 2.3) * 0.08;
+        n.prevX = curX;
+        n.prevY = curY;
       }
-    };
-
-    // ── Update all particle buffers (called every frame) ──────────────────────
-
-    const updateParticles = () => {
-      // ── Edge particles ────────────────────────────────────────────────────
-      for (let ei = 0; ei < edgeInfos.length; ei++) {
-        const e = edgeInfos[ei];
-        const src = nodes[e.sourceIndex].position;
-        const tgt = nodes[e.targetIndex].position;
-        const srcCol = nodes[e.sourceIndex].baseColor;
-        const tgtCol = nodes[e.targetIndex].baseColor;
-        const wx = edgeWobbleX[ei];
-        const wy = edgeWobbleY[ei];
-        const baseAlpha = edgeHighlight[ei];
-
-        for (let p = 0; p < PARTICLES_PER_EDGE; p++) {
-          const t = p / (PARTICLES_PER_EDGE - 1);
-          const pidx = ei * PARTICLES_PER_EDGE + p;
-          const b3 = pidx * 3;
-          const wobble = Math.sin(t * Math.PI);
-
-          // Position: lerp + perpendicular organic wobble
-          edgePosArr[b3 + 0] = src.x + (tgt.x - src.x) * t + wx * wobble;
-          edgePosArr[b3 + 1] = src.y + (tgt.y - src.y) * t + wy * wobble;
-          edgePosArr[b3 + 2] = src.z + (tgt.z - src.z) * t;
-
-          // Color: lerp source → target
-          edgeColArr[b3 + 0] = srcCol.r + (tgtCol.r - srcCol.r) * t;
-          edgeColArr[b3 + 1] = srcCol.g + (tgtCol.g - srcCol.g) * t;
-          edgeColArr[b3 + 2] = srcCol.b + (tgtCol.b - srcCol.b) * t;
-
-          // Alpha: fade at both ends, bright in middle
-          edgeAlphaArr[pidx] = baseAlpha * wobble;
-        }
-      }
-
-      (edgeGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
-      (edgeGeo.getAttribute("aColor") as BufferAttribute).needsUpdate = true;
-      (edgeGeo.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
-
-      // ── Node particles ────────────────────────────────────────────────────
-      for (let i = 0; i < nodes.length; i++) {
-        const n = nodes[i];
-        const b3 = i * 3;
-        const hi = nodes.length + i;
-        const hb3 = hi * 3;
-
-        // Position (core + halo follow node)
-        nodePosArr[b3 + 0] = n.position.x;
-        nodePosArr[b3 + 1] = n.position.y;
-        nodePosArr[b3 + 2] = n.position.z;
-        nodePosArr[hb3 + 0] = n.position.x;
-        nodePosArr[hb3 + 1] = n.position.y;
-        nodePosArr[hb3 + 2] = n.position.z;
-
-        // Size + alpha per state
-        if (flash && flash.idx === i) {
-          const flashFrac = Math.min(1, flash.frame / 24);
-          const boost = 1 - flashFrac;
-          nodeAlphaArr[i] = 0.9 + boost * 0.5;
-          nodeSizeArr[i] = n.radius * 2.5 * (1 + boost * 0.6);
-          // Flash color: white → base
-          const fr = 1.0 - flashFrac + n.baseColor.r * flashFrac;
-          const fg = 1.0 - flashFrac + n.baseColor.g * flashFrac;
-          const fb = 1.0 - flashFrac + n.baseColor.b * flashFrac;
-          nodeColArr[b3 + 0] = fr;
-          nodeColArr[b3 + 1] = fg;
-          nodeColArr[b3 + 2] = fb;
-        } else if (hoveredIdx === i) {
-          nodeAlphaArr[i] = 1.0;
-          nodeSizeArr[i] = n.radius * 2.5 * 1.4;
-          nodeAlphaArr[hi] = 0.4;
-          nodeSizeArr[hi] = Math.min(n.radius * 7.0, 80);
-          nodeColArr[b3 + 0] = n.baseColor.r;
-          nodeColArr[b3 + 1] = n.baseColor.g;
-          nodeColArr[b3 + 2] = n.baseColor.b;
-        } else {
-          nodeAlphaArr[i] = 0.9;
-          nodeSizeArr[i] = n.radius * 2.5;
-          nodeAlphaArr[hi] = 0.25;
-          nodeSizeArr[hi] = Math.min(n.radius * 5.0, 60);
-          nodeColArr[b3 + 0] = n.baseColor.r;
-          nodeColArr[b3 + 1] = n.baseColor.g;
-          nodeColArr[b3 + 2] = n.baseColor.b;
-        }
-      }
-
-      (nodeGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
-      (nodeGeo.getAttribute("aColor") as BufferAttribute).needsUpdate = true;
-      (nodeGeo.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
-      (nodeGeo.getAttribute("aSize") as BufferAttribute).needsUpdate = true;
-    };
-
-    // ── Project world pos to screen ───────────────────────────────────────────
-
-    const projectToScreen = (pos: Vector3): [number, number] => {
-      const v = pos.clone().project(camera);
-      return [
-        (v.x * 0.5 + 0.5) * width,
-        (-v.y * 0.5 + 0.5) * height,
-      ];
     };
 
     // ── Animation loop ────────────────────────────────────────────────────────
@@ -539,26 +403,29 @@ export default function GraphCanvas({
 
     const animate = () => {
       time += 0.016;
-
       simulate();
 
-      // Hover detection
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(nodeMeshes, false);
-      const newHovered =
-        hits.length > 0
-          ? nodes.findIndex((n) => n.mesh === hits[0].object)
-          : null;
+      // ── Hover detection ────────────────────────────────────────────────────
+      const [wmx, wmy] = screenToWorld(mouseX, mouseY);
+      let newHovered: number | null = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const dx = n.x - wmx;
+        const dy = n.y - wmy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const hitR = Math.max(n.radius * 1.5, 12);
+        if (dist < hitR && dist < bestDist) {
+          bestDist = dist;
+          newHovered = i;
+        }
+      }
 
       if (newHovered !== hoveredIdx) {
         hoveredIdx = newHovered;
-        // Update edge highlight factors
         for (let ei = 0; ei < edgeInfos.length; ei++) {
           const e = edgeInfos[ei];
-          if (
-            hoveredIdx !== null &&
-            (e.sourceIndex === hoveredIdx || e.targetIndex === hoveredIdx)
-          ) {
+          if (hoveredIdx !== null && (e.sourceIndex === hoveredIdx || e.targetIndex === hoveredIdx)) {
             edgeHighlight[ei] = 1.0;
           } else {
             edgeHighlight[ei] = e.sharedConnections >= 3 ? 0.3 : 0.18;
@@ -566,74 +433,118 @@ export default function GraphCanvas({
         }
       }
 
-      // Advance flash
+      // Flash
       if (flash) {
         flash.frame++;
         if (flash.frame >= 24) flash = null;
       }
 
-      updateParticles();
+      // ── Render ─────────────────────────────────────────────────────────────
 
-      // Label (hover-only, canvas-2D)
-      labelCtx.clearRect(0, 0, width, height);
-      if (hoveredIdx !== null) {
-        const n = nodes[hoveredIdx];
-        const [sx, sy] = projectToScreen(n.position);
-        const screenR =
-          (n.radius * 1.4 * height) /
-          (2 * CAM_Z * Math.tan(((FOV_DEG * Math.PI) / 180) / 2));
-        labelCtx.font = '10px "IBM Plex Mono", monospace';
-        labelCtx.fillStyle = "rgba(255,255,255,0.75)";
-        labelCtx.fillText(n.title, sx + screenR + 8, sy + 3);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, width, height);
+
+      // Draw edges
+      for (let ei = 0; ei < edgeInfos.length; ei++) {
+        const e = edgeInfos[ei];
+        const src = nodes[e.sourceIndex];
+        const tgt = nodes[e.targetIndex];
+        const [sx, sy] = worldToScreen(src.x, src.y);
+        const [tx, ty] = worldToScreen(tgt.x, tgt.y);
+        drawPixelLine(sx, sy, tx, ty, src.colorRgb, tgt.colorRgb, edgeHighlight[ei] * 0.6);
       }
 
-      renderer.render(scene, camera);
+      // Draw nodes
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        const [sx, sy] = worldToScreen(n.x, n.y);
+        const screenR = n.radius * camZoom;
+
+        // Halo
+        let haloAlpha = 0.15;
+        let sizeMultiplier = 1.0;
+
+        if (flash && flash.idx === i) {
+          const frac = Math.min(1, flash.frame / 24);
+          haloAlpha = 0.4 * (1 - frac) + 0.15 * frac;
+          sizeMultiplier = 1 + (1 - frac) * 0.6;
+          // Flash color: white -> base
+          const r = Math.round(255 * (1 - frac) + n.colorRgb[0] * frac);
+          const g = Math.round(255 * (1 - frac) + n.colorRgb[1] * frac);
+          const b = Math.round(255 * (1 - frac) + n.colorRgb[2] * frac);
+          drawPixelCircle(sx, sy, screenR * 2.5 * sizeMultiplier, `rgb(${r},${g},${b})`, haloAlpha);
+          drawPixelCircle(sx, sy, screenR * sizeMultiplier, `rgb(${r},${g},${b})`, 0.9);
+        } else if (hoveredIdx === i) {
+          drawPixelCircle(sx, sy, screenR * 3.0, n.color, 0.3);
+          drawPixelCircle(sx, sy, screenR * 1.4, n.color, 1.0);
+        } else {
+          drawPixelCircle(sx, sy, screenR * 2.0, n.color, haloAlpha);
+          drawPixelCircle(sx, sy, screenR, n.color, 0.9);
+        }
+      }
+
+      // Draw label on hover
+      if (hoveredIdx !== null) {
+        const n = nodes[hoveredIdx];
+        const [sx, sy] = worldToScreen(n.x, n.y);
+        const screenR = n.radius * camZoom;
+        ctx.globalAlpha = 0.85;
+        ctx.font = '10px "IBM Plex Mono", monospace';
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+
+        // Pixelated text background
+        const textWidth = ctx.measureText(n.title).width;
+        const labelX = sx + screenR + 10;
+        const labelY = sy + 3;
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(labelX - 2, labelY - 10, textWidth + 4, 14);
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(n.title, labelX, labelY);
+      }
+
+      // Cursor style
+      input.style.cursor = hoveredIdx !== null ? "pointer" : isPanning ? "grabbing" : "grab";
+
+      ctx.globalAlpha = 1;
       animId = window.requestAnimationFrame(animate);
     };
 
     animate();
 
-    // ── Resize ────────────────────────────────────────────────────────────────
-
-    const resize = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      renderer.setSize(width, height);
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      resizeLabelCanvas();
-    };
-
-    resize();
     window.addEventListener("resize", resize);
-
-    // ── Cleanup ───────────────────────────────────────────────────────────────
 
     return () => {
       window.cancelAnimationFrame(animId);
       window.removeEventListener("resize", resize);
       input.removeEventListener("pointermove", onPointerMove);
       input.removeEventListener("click", onClick);
-      sphereGeo.dispose();
-      edgeGeo.dispose();
-      nodeGeo.dispose();
-      particleMat.dispose();
-      renderer.dispose();
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement);
-      }
-      if (labelCanvas.parentNode) {
-        labelCanvas.parentNode.removeChild(labelCanvas);
-      }
+      input.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      input.removeEventListener("wheel", onWheel);
     };
   }, [graph]);
 
   return (
     <>
-      <div ref={containerRef} />
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          zIndex: 0,
+          imageRendering: "pixelated",
+        }}
+      />
       <div ref={inputRef} className="graph-input-layer" />
       <Link href="/" className="return-to-void">
-        ← RETURN TO VOID
+        &larr; RETURN TO VOID
       </Link>
     </>
   );
