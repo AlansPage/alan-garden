@@ -4,9 +4,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PIXEL = 4; // Each "pixel" is 4x4 real pixels for chunky retro look
-const CREATURE_RADIUS = 32; // In game-pixels
-const CORE_RADIUS = 10;
+const PIXEL = 5; // Each "pixel" is 5x5 real pixels for chunky retro look
+const CREATURE_RADIUS = 48; // In game-pixels (1.5x bigger)
+const CORE_RADIUS = 15;
 const SPIKE_COUNT = 8;
 
 // ── Color palette (JRPG crystal orb) ──────────────────────────────────────────
