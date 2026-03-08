@@ -88,8 +88,8 @@ const CORE_COUNT   = 20000;  // hot red/orange core
 const STREAM_COUNT = 600;
 
 const OUTER_RADIUS  = 260;   // nominal sphere radius (world units)
-const SHELL_INNER   = 168;   // inner edge of blue outer shell
-const MOAT_INNER    = 82;    // inner edge of dark moat / outer edge of core
+const SHELL_INNER   = 192;   // inner edge of blue outer shell
+const MOAT_INNER    = 52;    // inner edge of dark moat / outer edge of core
 const SPIKE_COUNT   = 9;     // number of dark radial void spikes
 
 // ── Shaders ───────────────────────────────────────────────────────────────────
@@ -97,6 +97,7 @@ const SPIKE_COUNT   = 9;     // number of dark radial void spikes
 const SPHERE_VERT = /* glsl */ `
   uniform float breathe;
   uniform float uGlobalAlpha;
+  uniform float uDPR;
   attribute float size;
   attribute vec3 aColor;
   attribute float aAlpha;
@@ -107,7 +108,7 @@ const SPHERE_VERT = /* glsl */ `
     vAlpha = aAlpha * uGlobalAlpha;
     vec3 pos = position * breathe;
     vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-    gl_PointSize = size;
+    gl_PointSize = size * uDPR;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -118,11 +119,9 @@ const SPHERE_FRAG = /* glsl */ `
   varying float vAlpha;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    if (d > 0.5) discard;
-    float alpha = 1.0 - smoothstep(0.0, 0.5, d);
-    alpha = pow(alpha, 2.2);
-    float core = max(0.0, 1.0 - d * 7.0);
-    vec3 lit = vColor * uCoreBrightness + vec3(core * 0.08);
+    // Tight gaussian — hard bright center, clean falloff
+    float alpha = exp(-d * d * 14.0);
+    vec3 lit = vColor * uCoreBrightness;
     gl_FragColor = vec4(lit, alpha * vAlpha);
   }
 `;
@@ -240,7 +239,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new Vector2(width, height), 0.55, 0.4, 0.72);
+    const bloomPass = new UnrealBloomPass(new Vector2(width, height), 0.30, 0.25, 0.82);
     composer.addPass(bloomPass);
 
     // ── Sphere group ──────────────────────────────────────────────────────────
@@ -355,6 +354,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         breathe: { value: 1.0 },
         uGlobalAlpha: { value: 1.0 },
         uCoreBrightness: { value: 1.0 },
+        uDPR: { value: Math.min(window.devicePixelRatio, 1.5) },
       },
       transparent: true,
       depthWrite: false,
@@ -404,14 +404,14 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       const radFraction = (r - MOAT_INNER) / (SHELL_INNER - MOAT_INNER); // 0→1
       // Noise perturbation for organic ragged spike edges
       const edgeNoise = simplex3(nx * 3.5 + 7, ny * 3.5 + 13, nz * 3.5) * 0.06;
-      const voidHalfFrac = 0.28 + radFraction * 0.16 + edgeNoise; // 0.28→0.44 + noise
+      const voidHalfFrac = 0.32 + radFraction * 0.20 + edgeNoise; // 0.32→0.52 + noise
       const voidHalfAngle = spikePeriod * voidHalfFrac;
 
       const inVoid = withinPeriod < voidHalfAngle || withinPeriod > (spikePeriod - voidHalfAngle);
       if (inVoid) continue; // dark spike zone — no particles here
 
-      // Bridge zone: very sparse (3% survival)
-      if (Math.random() > 0.03) continue;
+      // Bridge zone: very sparse (1.5% survival)
+      if (Math.random() > 0.015) continue;
 
       const i = moatPlaced;
       moatPositions[i * 3]     = nx * r;
@@ -441,6 +441,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         breathe: { value: 1.0 },
         uGlobalAlpha: { value: 1.0 },
         uCoreBrightness: { value: 1.0 },
+        uDPR: { value: Math.min(window.devicePixelRatio, 1.5) },
       },
       transparent: true,
       depthWrite: false,
@@ -526,6 +527,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         breathe: { value: 1.0 },
         uGlobalAlpha: { value: 1.0 },
         uCoreBrightness: { value: 1.0 },
+        uDPR: { value: Math.min(window.devicePixelRatio, 1.5) },
       },
       transparent: true,
       depthWrite: false,
@@ -559,7 +561,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       depthWrite: false,
     });
     const glowSprite = new Sprite(glowMat);
-    glowSprite.scale.set(210, 210, 1);
+    glowSprite.scale.set(72, 72, 1);
     glowSprite.position.set(0, 0, 1);
     sphereGroup.add(glowSprite);
 
@@ -616,7 +618,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     const onStartFeeding = () => {
       feedActive = true;
-      coreBrightnessTarget = 2.2;
+      coreBrightnessTarget = 1.35;
       const [wx, wy] = screenToWorld(width * 0.5, height * 0.18);
       feedTargetWorldX = wx;
       feedTargetWorldY = wy;
@@ -671,7 +673,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       coreBrightness += (coreBrightnessTarget - coreBrightness) * bLerp;
       coreMat.uniforms.uCoreBrightness.value = coreBrightness;
       outerMat.uniforms.uCoreBrightness.value = 1.0; // outer shell never brightens
-      const spriteScale = 210 * (0.75 + 0.45 * coreBrightness);
+      const spriteScale = 72 * (0.85 + 0.3 * (coreBrightness - 1.0));
       glowSprite.scale.set(spriteScale, spriteScale, 1);
 
       // Global dim (search overlay)
