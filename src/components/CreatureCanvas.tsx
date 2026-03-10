@@ -46,6 +46,86 @@ function lerpColor(
   return `rgb(${r},${g},${bl})`;
 }
 
+// ── Synthesized SFX ───────────────────────────────────────────────────────────
+// No audio files. All sounds generated via Web Audio API oscillators.
+function createAudioEngine() {
+  let ctx: AudioContext | null = null;
+  const getCtx = () => {
+    if (!ctx) ctx = new AudioContext();
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  };
+  return {
+    // Low pulsing idle hum — creature is alive
+    playIdleHum() {
+      const c = getCtx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.connect(gain); gain.connect(c.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(55, c.currentTime);
+      osc.frequency.linearRampToValueAtTime(52, c.currentTime + 2);
+      gain.gain.setValueAtTime(0, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0.04, c.currentTime + 0.5);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 2.5);
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + 2.5);
+    },
+    // Rising drone on feeding start
+    playFeedStart() {
+      const c = getCtx();
+      [60, 90, 120].forEach((freq, i) => {
+        const osc = c.createOscillator();
+        const gain = c.createGain();
+        osc.connect(gain); gain.connect(c.destination);
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(freq * 0.8, c.currentTime + i * 0.05);
+        osc.frequency.linearRampToValueAtTime(freq, c.currentTime + 0.4 + i * 0.05);
+        gain.gain.setValueAtTime(0, c.currentTime + i * 0.05);
+        gain.gain.linearRampToValueAtTime(0.06, c.currentTime + 0.15 + i * 0.05);
+        gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.9 + i * 0.05);
+        osc.start(c.currentTime + i * 0.05);
+        osc.stop(c.currentTime + 1.0 + i * 0.05);
+      });
+    },
+    // Crunchy hit when a character is consumed
+    playCharConsumed() {
+      const c = getCtx();
+      const bufSize = c.sampleRate * 0.06;
+      const buf = c.createBuffer(1, bufSize, c.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 3);
+      }
+      const src = c.createBufferSource();
+      const gain = c.createGain();
+      const filter = c.createBiquadFilter();
+      src.buffer = buf;
+      filter.type = "bandpass";
+      filter.frequency.value = 800;
+      filter.Q.value = 0.8;
+      src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+      gain.gain.setValueAtTime(0.18, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.06);
+      src.start(c.currentTime);
+    },
+    // Resolution tone when feeding stops
+    playFeedEnd() {
+      const c = getCtx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.connect(gain); gain.connect(c.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(220, c.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(110, c.currentTime + 0.6);
+      gain.gain.setValueAtTime(0.12, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.6);
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + 0.6);
+    },
+  };
+}
+
 // Simple seeded pseudo-random for deterministic pixel patterns
 function seededRand(seed: number): number {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
@@ -115,6 +195,12 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     let coreBrightnessTarget = 1.0;
     let globalAlpha = 1.0;
     let globalAlphaTarget = 1.0;
+
+    const sfx = createAudioEngine();
+    // Idle heartbeat — every 8 seconds
+    const idleHumInterval = window.setInterval(() => {
+      if (!feedActive) sfx.playIdleHum();
+    }, 8000);
 
     const TENDRIL_COUNT = 6;
     const TENDRIL_SEGMENTS = 28; // game-pixel segments per arm
@@ -260,11 +346,13 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const onStartFeeding = () => {
       feedActive = true;
       coreBrightnessTarget = 1.4;
+      sfx.playFeedStart();
     };
 
     const onStopFeeding = () => {
       feedActive = false;
       coreBrightnessTarget = 1.0;
+      sfx.playFeedEnd();
       for (const p of streamParticles) {
         p.alive = false;
       }
@@ -275,9 +363,15 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       globalAlphaTarget = dim ? 0.12 : 1.0;
     };
 
+    const onCharConsumed = () => {
+      // Only play every 4th character — not every single one
+      if (Math.random() < 0.25) sfx.playCharConsumed();
+    };
+
     window.addEventListener("creature-start-feeding", onStartFeeding);
     window.addEventListener("creature-stop-feeding", onStopFeeding);
     window.addEventListener("creature-dim", handleDim);
+    window.addEventListener("creature-char-consumed", onCharConsumed);
 
     // ── Animation loop ────────────────────────────────────────────────────────
 
@@ -491,10 +585,12 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
     return () => {
       window.cancelAnimationFrame(animFrameRef.current);
+      window.clearInterval(idleHumInterval);
       window.removeEventListener("resize", resize);
       window.removeEventListener("creature-start-feeding", onStartFeeding);
       window.removeEventListener("creature-stop-feeding", onStopFeeding);
       window.removeEventListener("creature-dim", handleDim);
+      window.removeEventListener("creature-char-consumed", onCharConsumed);
     };
   }, []);
 
