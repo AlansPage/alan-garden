@@ -5,9 +5,10 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PIXEL = 5; // Each "pixel" is 5x5 real pixels for chunky retro look
-const CREATURE_RADIUS = 48; // In game-pixels (1.5x bigger)
-const CORE_RADIUS = 15;
-const SPIKE_COUNT = 8;
+const CREATURE_RADIUS = 72;   // fills ~70% of viewport height
+const CORE_RADIUS = 14;       // core stays tight — the moat needs to dominate
+const MOAT_WIDTH = 18;        // deep, wide darkness between core and shell
+const SPIKE_COUNT = 9;
 
 // ── Color palette (JRPG crystal orb) ──────────────────────────────────────────
 
@@ -156,9 +157,11 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
         // Noise-like displacement for organic edge
         const angle = Math.atan2(gy, gx);
+        // Three frequency layers: large spikes + medium jagged + fine texture
         const noiseDisp =
-          Math.sin(angle * SPIKE_COUNT + seed * 6.28) * 3 +
-          Math.sin(angle * (SPIKE_COUNT * 2.3) + 1.7) * 1.5;
+          Math.sin(angle * SPIKE_COUNT + seed * 6.28) * 10 +
+          Math.sin(angle * (SPIKE_COUNT * 2.7) + seed * 4.1) * 5 +
+          Math.sin(angle * (SPIKE_COUNT * 4.5) + seed * 9.3) * 2;
         const effectiveRadius = CREATURE_RADIUS + noiseDisp;
 
         if (dist > effectiveRadius + 1) continue;
@@ -184,14 +187,15 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
             baseAlpha: 0.85 + seed * 0.15,
             seed,
           });
-        } else if (dist <= CORE_RADIUS + 5) {
+        } else if (dist <= CORE_RADIUS + MOAT_WIDTH) {
           // Moat (sparse dark zone between core and shell)
-          // Spike voids
+          // Aggressive spike voids — wide dark claws radiating outward
+          const spikeHalf = 0.22 + ((dist - CORE_RADIUS) / MOAT_WIDTH) * 0.18;
           const withinSpike = Math.abs(
             ((angle + Math.PI) % (Math.PI * 2 / SPIKE_COUNT)) - Math.PI / SPIKE_COUNT
-          ) < 0.15 + (dist - CORE_RADIUS) * 0.02;
-          if (withinSpike && seed > 0.3) continue; // dark void spike
-          if (seed > 0.08) continue; // very sparse
+          ) < spikeHalf;
+          if (withinSpike) continue;   // hard void — no particles in claw direction
+          if (seed > 0.04) continue;   // 4% survival — near-empty moat
           creaturePixels.push({
             gx, gy, layer: "moat",
             baseColor: COL_OUTER_DARK,
@@ -200,7 +204,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
           });
         } else {
           // Outer shell
-          const shellT = (dist - CORE_RADIUS - 5) / (effectiveRadius - CORE_RADIUS - 5);
+          const shellT = (dist - CORE_RADIUS - MOAT_WIDTH) / (effectiveRadius - CORE_RADIUS - MOAT_WIDTH);
           let col: string;
           if (shellT > 0.85) {
             col = lerpColor(outerTipRgb, shellHighlightRgb, (shellT - 0.85) / 0.15);
