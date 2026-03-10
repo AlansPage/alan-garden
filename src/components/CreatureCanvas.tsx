@@ -287,14 +287,35 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       // Slow rotation effect via shifting pixel selection
       const rotAngle = time * 0.08;
 
+      // ── Dark corruption aura ─────────────────────────────────────────────
+      // Pulsing black-purple shadow — drawn under everything
+      const auraSize = CREATURE_RADIUS * PIXEL * (2.2 + Math.sin(time * 0.6) * 0.15);
+      const auraGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraSize);
+      auraGrad.addColorStop(0,    "rgba(0,0,0,0)");
+      auraGrad.addColorStop(0.35, "rgba(0,0,0,0)");
+      auraGrad.addColorStop(0.55, "rgba(20,0,40,0.35)");   // deep violet
+      auraGrad.addColorStop(0.72, "rgba(40,0,20,0.55)");   // dark crimson
+      auraGrad.addColorStop(0.85, "rgba(10,0,10,0.7)");
+      auraGrad.addColorStop(1,    "rgba(0,0,0,0)");
+      ctx.globalAlpha = globalAlpha;
+      ctx.fillStyle = auraGrad;
+      ctx.fillRect(cx - auraSize, cy - auraSize, auraSize * 2, auraSize * 2);
+
       ctx.globalAlpha = globalAlpha;
 
       // ── Draw creature pixels ──────────────────────────────────────────────
 
       for (const px of creaturePixels) {
-        // Apply breathing scale
-        const sx = px.gx * breathe;
-        const sy = px.gy * breathe;
+        // Spike layer gets independent radial writhe
+        // Each outer pixel pulses based on its angle + seed — organic claw motion
+        let scale = breathe;
+        if (px.layer === "outer") {
+          const pxAngle = Math.atan2(px.gy, px.gx);
+          const writhe = 1.0 + Math.sin(time * 1.8 + pxAngle * SPIKE_COUNT * 0.5 + px.seed * 12) * 0.04;
+          scale = breathe * writhe;
+        }
+        const sx = px.gx * scale;
+        const sy = px.gy * scale;
 
         // Apply subtle rotation
         const cos = Math.cos(rotAngle);
