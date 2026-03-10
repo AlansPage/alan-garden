@@ -155,10 +155,13 @@ interface StreamParticle {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
-  _props,
-  ref
-) {
+interface CreatureProps {
+  noteCount?: number;
+  totalWords?: number;
+}
+
+const CreatureCanvas = forwardRef<CreatureRef, CreatureProps>(
+  function CreatureCanvas({ noteCount = 7, totalWords = 5000 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
 
@@ -229,6 +232,15 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     );
 
     // ── Pre-compute pixel data for creature shape ─────────────────────────────
+    // Creature grows with vault — min 52px, max 88px radius
+    // at 7 notes it's ~52, at 100 notes it's ~88
+    const scaledRadius = Math.round(
+      52 + Math.min(1, noteCount / 100) * 36
+    );
+    // Spike aggression grows with word density
+    // more words = more violent outer edge
+    const scaledNoiseAmp = 8 + Math.min(1, totalWords / 50000) * 8;
+
     // We generate a lookup of which pixels belong to the creature and their
     // color/alpha, then render them each frame with slight animation.
 
@@ -242,7 +254,6 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     }
 
     const creaturePixels: CreaturePixel[] = [];
-    const diameter = CREATURE_RADIUS * 2 + 2;
 
     const outerDarkRgb = hexToRgb(COL_OUTER_DARK);
     const outerMidRgb = hexToRgb(COL_OUTER_MID);
@@ -256,8 +267,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     const coreRedRgb = hexToRgb(COL_CORE_RED);
     const coreDarkRedRgb = hexToRgb(COL_CORE_DARK_RED);
 
-    for (let gy = -CREATURE_RADIUS - 1; gy <= CREATURE_RADIUS + 1; gy++) {
-      for (let gx = -CREATURE_RADIUS - 1; gx <= CREATURE_RADIUS + 1; gx++) {
+    for (let gy = -scaledRadius - 1; gy <= scaledRadius + 1; gy++) {
+      for (let gx = -scaledRadius - 1; gx <= scaledRadius + 1; gx++) {
         const dist = Math.sqrt(gx * gx + gy * gy);
         const seed = seededRand(gx * 1000 + gy);
 
@@ -265,10 +276,10 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
         const angle = Math.atan2(gy, gx);
         // Three frequency layers: large spikes + medium jagged + fine texture
         const noiseDisp =
-          Math.sin(angle * SPIKE_COUNT + seed * 6.28) * 10 +
-          Math.sin(angle * (SPIKE_COUNT * 2.7) + seed * 4.1) * 5 +
+          Math.sin(angle * SPIKE_COUNT + seed * 6.28) * scaledNoiseAmp +
+          Math.sin(angle * (SPIKE_COUNT * 2.7) + seed * 4.1) * (scaledNoiseAmp * 0.5) +
           Math.sin(angle * (SPIKE_COUNT * 4.5) + seed * 9.3) * 2;
-        const effectiveRadius = CREATURE_RADIUS + noiseDisp;
+        const effectiveRadius = scaledRadius + noiseDisp;
 
         if (dist > effectiveRadius + 1) continue;
 
@@ -403,7 +414,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
 
       // ── Dark corruption aura ─────────────────────────────────────────────
       // Pulsing black-purple shadow — drawn under everything
-      const auraSize = CREATURE_RADIUS * PIXEL * (2.2 + Math.sin(time * 0.6) * 0.15);
+      const auraSize = scaledRadius * PIXEL * (2.2 + Math.sin(time * 0.6) * 0.15);
       const auraGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraSize);
       auraGrad.addColorStop(0,    "rgba(0,0,0,0)");
       auraGrad.addColorStop(0.35, "rgba(0,0,0,0)");
@@ -472,7 +483,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       // ── Outer glow haze ────────────────────────────────────────────────────
 
       ctx.globalAlpha = globalAlpha * 0.12;
-      const outerGlow = CREATURE_RADIUS * PIXEL * 1.8 * breathe;
+      const outerGlow = scaledRadius * PIXEL * 1.8 * breathe;
       const outerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerGlow);
       outerGrad.addColorStop(0, "rgba(51,119,255,0.3)");
       outerGrad.addColorStop(0.5, "rgba(10,26,85,0.15)");
@@ -488,8 +499,8 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       for (const arm of tendrilArms) {
         // Current arm root angle drifts very slowly
         const rootAngle = arm.baseAngle + Math.sin(time * 0.22 + arm.phase) * 0.3;
-        let segX = cx + Math.cos(rootAngle) * CREATURE_RADIUS * PIXEL;
-        let segY = cy + Math.sin(rootAngle) * CREATURE_RADIUS * PIXEL;
+        let segX = cx + Math.cos(rootAngle) * scaledRadius * PIXEL;
+        let segY = cy + Math.sin(rootAngle) * scaledRadius * PIXEL;
         let currentAngle = rootAngle;
 
         const segLen = PIXEL * 2; // each segment = 2 game pixels of length
@@ -592,7 +603,7 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       window.removeEventListener("creature-dim", handleDim);
       window.removeEventListener("creature-char-consumed", onCharConsumed);
     };
-  }, []);
+  }, [noteCount, totalWords]);
 
   return (
     <canvas

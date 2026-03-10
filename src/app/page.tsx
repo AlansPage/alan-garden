@@ -16,7 +16,7 @@ export default function Home() {
 
   return (
     <div>
-      <CreatureCanvas />
+      <CreatureCanvas noteCount={stats.totalNotes} totalWords={stats.totalWords} />
       <HomeShell stats={stats} items={items} />
     </div>
   );

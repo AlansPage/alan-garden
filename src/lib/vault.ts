@@ -49,6 +49,8 @@ export interface GraphData {
 export interface VaultStats {
   noteCount: number;
   essayCount: number;
+  totalNotes: number;
+  totalWords: number;
   lastUpdate: string;
 }
 
@@ -224,9 +226,17 @@ export function getVaultStats(): VaultStats {
     if (d && (!lastUpdate || d > lastUpdate)) lastUpdate = d;
   }
 
+  const totalNotes = all.length;
+  const totalWords = all.reduce(
+    (sum, n) => sum + n.content.split(/\s+/).filter((w) => w.trim().length > 0).length,
+    0
+  );
+
   return {
     noteCount,
     essayCount,
+    totalNotes,
+    totalWords,
     lastUpdate: lastUpdate || new Date().toISOString().slice(0, 10),
   };
 }

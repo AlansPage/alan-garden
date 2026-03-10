@@ -17,7 +17,7 @@ export default function EssaysPage() {
 
   return (
     <div>
-      <CreatureCanvas />
+      <CreatureCanvas noteCount={stats.totalNotes} totalWords={stats.totalWords} />
 
       <header className="site-id">
         <div className="site-id-label">ALAN_GARDEN</div>

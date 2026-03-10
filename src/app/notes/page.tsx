@@ -17,7 +17,7 @@ export default function NotesPage() {
 
   return (
     <div>
-      <CreatureCanvas />
+      <CreatureCanvas noteCount={stats.totalNotes} totalWords={stats.totalWords} />
 
       <header className="site-id">
         <div className="site-id-label">ALAN_GARDEN</div>

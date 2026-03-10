@@ -26,13 +26,15 @@ interface NoteShellProps {
   children: React.ReactNode;
   disableFeeding?: boolean;
   isEssay?: boolean;
+  noteCount?: number;
+  totalWords?: number;
 }
 
 export default function NoteShell(props: NoteShellProps) {
   const creatureRef = useRef<CreatureRef>(null);
   return (
     <>
-      <CreatureCanvas ref={creatureRef} />
+      <CreatureCanvas ref={creatureRef} noteCount={props.noteCount} totalWords={props.totalWords} />
       <NotePageClient {...props} creatureRef={creatureRef} />
     </>
   );

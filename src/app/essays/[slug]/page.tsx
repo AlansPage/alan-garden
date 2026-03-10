@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { MDXRemote } from "next-mdx-remote/rsc";
-import { getAllNotes, getNoteBySlug } from "@/lib/vault";
+import { getAllNotes, getNoteBySlug, getVaultStats } from "@/lib/vault";
 import NoteShell from "@/components/NoteShell";
 
 function transformWikilinks(content: string): string {
@@ -23,6 +23,7 @@ export default async function EssayPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const stats = getVaultStats();
   const note = getNoteBySlug(slug);
   if (!note || note.type !== "essay") return notFound();
   const transformed = transformWikilinks(note.content);
@@ -44,6 +45,8 @@ export default async function EssayPage({
       backlinks={note.backlinks}
       disableFeeding={true}
       isEssay={true}
+      noteCount={stats.totalNotes}
+      totalWords={stats.totalWords}
     >
       <MDXRemote source={transformed} />
     </NoteShell>

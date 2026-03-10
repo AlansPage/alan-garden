@@ -271,8 +271,8 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
         </nav>
 
         <div className="home-status">
-          VAULT_STATUS: {stats.noteCount} NOTES · {stats.essayCount} ESSAYS ·
-          LAST_UPDATE: {stats.lastUpdate}
+          VAULT_MIND: {stats.totalNotes} ENTITIES CONSUMED ·{" "}
+          {stats.totalWords.toLocaleString()} WORDS ABSORBED
         </div>
 
         {dropState === "hovering" && (
