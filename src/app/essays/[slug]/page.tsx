@@ -13,11 +13,11 @@ function transformWikilinks(content: string): string {
 }
 
 export async function generateStaticParams() {
-  const all = getAllNotes().filter((n) => n.type === "note");
+  const all = getAllNotes().filter((n) => n.type === "essay");
   return all.map((n) => ({ slug: n.slug }));
 }
 
-export default async function NotePage({
+export default async function EssayPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -25,7 +25,7 @@ export default async function NotePage({
   const { slug } = await params;
   const stats = getVaultStats();
   const note = getNoteBySlug(slug);
-  if (!note || note.type !== "note") return notFound();
+  if (!note || note.type !== "essay") return notFound();
   const transformed = transformWikilinks(note.content);
   const wordCount = note.content
     .split(/\s+/)
@@ -43,6 +43,8 @@ export default async function NotePage({
       wordCount={wordCount}
       minutes={minutes}
       backlinks={note.backlinks}
+      disableFeeding={true}
+      isEssay={true}
       noteCount={stats.totalNotes}
       totalWords={stats.totalWords}
     >

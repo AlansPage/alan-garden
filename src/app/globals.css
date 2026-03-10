@@ -1,3 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
 :root {
   --background: #000000;
   --foreground: #ffffff;
@@ -14,8 +17,10 @@ body {
 }
 
 body.garden-body {
-  font-family: var(--font-plex-mono), "IBM Plex Mono", system-ui, -apple-system,
+  font-family: "Press Start 2P", var(--font-plex-mono), "IBM Plex Mono", system-ui, -apple-system,
     BlinkMacSystemFont, "Segoe UI", monospace;
+  image-rendering: pixelated;
+  -ms-interpolation-mode: nearest-neighbor;
 }
 
 * {
@@ -47,8 +52,8 @@ canvas.creature-canvas {
 }
 
 .site-id-label {
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 8px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
 }
@@ -56,8 +61,9 @@ canvas.creature-canvas {
 .site-id-line {
   margin-top: 8px;
   width: 40px;
-  height: 1px;
+  height: 2px;
   background-color: #e8ff00;
+  image-rendering: pixelated;
 }
 
 .home-center {
@@ -79,10 +85,11 @@ canvas.creature-canvas {
   width: 100%;
   max-width: 560px;
   height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 0;
   background: #000000;
   padding: 0 14px;
+  box-shadow: 4px 4px 0 rgba(232, 255, 0, 0.15);
 }
 
 .home-search-icon {
@@ -97,7 +104,7 @@ canvas.creature-canvas {
   outline: none;
   background: transparent;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 10px;
   font-family: inherit;
 }
 
@@ -117,10 +124,10 @@ canvas.creature-canvas {
   align-items: center;
   justify-content: center;
   min-width: 18px;
-  padding: 1px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: 4px;
-  font-size: 10px;
+  padding: 2px 4px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 0;
+  font-size: 8px;
   color: rgba(255, 255, 255, 0.5);
 }
 
@@ -129,14 +136,21 @@ canvas.creature-canvas {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
-  letter-spacing: 0.15em;
+  font-size: 8px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.6);
 }
 
 .home-nav-item {
-  cursor: default;
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.home-nav-item:hover {
+  color: #e8ff00;
 }
 
 .home-nav-sep {
@@ -145,8 +159,8 @@ canvas.creature-canvas {
 
 .home-status {
   margin-top: 80px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.25);
 }
@@ -171,13 +185,15 @@ canvas.creature-canvas {
 .search-input {
   width: 100%;
   height: 52px;
-  border: 1px solid #e8ff00;
+  border: 2px solid #e8ff00;
+  border-radius: 0;
   background: transparent;
   color: #ffffff;
   font-family: inherit;
-  font-size: 20px;
+  font-size: 12px;
   padding: 0 14px;
   outline: none;
+  box-shadow: 4px 4px 0 rgba(232, 255, 0, 0.2);
 }
 
 .search-input::placeholder {
@@ -205,7 +221,7 @@ canvas.creature-canvas {
 }
 
 .search-result-title {
-  font-size: 14px;
+  font-size: 9px;
   color: #ffffff;
 }
 
@@ -214,13 +230,15 @@ canvas.creature-canvas {
 }
 
 .search-result-type {
-  font-size: 10px;
+  font-size: 7px;
   color: #e8ff00;
 }
 
 .search-result-excerpt {
   margin-top: 4px;
+  font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
+  line-height: 1.8;
   color: rgba(255, 255, 255, 0.5);
 }
 
@@ -248,10 +266,39 @@ canvas.creature-canvas {
   max-width: 680px;
   margin: 0 auto;
   padding: 80px 24px 120px 24px;
+  /* JRPG dialogue box: dark backdrop so text reads over the creature */
+  background: rgba(0, 0, 0, 0.72);
+  /* Pixel-art style: hard left/right border, no border-radius */
+  border-left: 2px solid rgba(255, 255, 255, 0.06);
+  border-right: 2px solid rgba(255, 255, 255, 0.06);
+  /* Soft scanline-style top/bottom fade */
+  box-shadow:
+    0 -40px 60px 20px rgba(0,0,0,0.8),
+    0  40px 60px 20px rgba(0,0,0,0.8);
+  min-height: 100vh;
 }
 
 .note-header {
   margin-bottom: 40px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.note-back-row {
+  margin-bottom: 24px;
+}
+
+.note-back-link {
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.note-back-link:hover {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .note-title-row {
@@ -264,7 +311,7 @@ canvas.creature-canvas {
 .note-status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
+  border-radius: 0;
   display: inline-block;
 }
 
@@ -281,10 +328,11 @@ canvas.creature-canvas {
 }
 
 .note-title {
-  font-size: 32px;
+  font-size: 13px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   margin: 0;
+  line-height: 1.6;
 }
 
 .note-meta-row {
@@ -292,7 +340,7 @@ canvas.creature-canvas {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 12px;
-  font-size: 11px;
+  font-size: 7px;
   color: rgba(255, 255, 255, 0.4);
 }
 
@@ -314,7 +362,7 @@ canvas.creature-canvas {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  font-size: 11px;
+  font-size: 7px;
 }
 
 .note-tag {
@@ -322,8 +370,10 @@ canvas.creature-canvas {
 }
 
 .note-body {
+  font-family: "IBM Plex Mono", monospace;
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.85;
+  font-weight: 400;
 }
 
 .note-body p {
@@ -375,8 +425,8 @@ canvas.creature-canvas {
 }
 
 .note-backlinks-label {
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 16px;
@@ -394,13 +444,15 @@ canvas.creature-canvas {
 }
 
 .note-backlink-title {
-  font-size: 14px;
+  font-size: 12px;
   margin-bottom: 4px;
 }
 
 .note-backlink-excerpt {
+  font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .char {
@@ -429,7 +481,7 @@ canvas.creature-canvas {
   width: 380px;
   height: 100vh;
   background: #000000;
-  border-left: 1px solid #ffffff;
+  border-left: 2px solid #ffffff;
   z-index: 20;
   opacity: 0;
   animation: graph-panel-fade-in 0.15s ease-out forwards;
@@ -450,25 +502,29 @@ canvas.creature-canvas {
 }
 
 .graph-panel-title {
-  font-size: 16px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   margin: 0;
+  line-height: 1.6;
 }
 
 .graph-panel-excerpt {
-  font-size: 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  line-height: 1.8;
   color: rgba(255, 255, 255, 0.8);
 }
 
 .graph-panel-backlinks {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 7px;
+  line-height: 1.8;
 }
 
 .graph-panel-backlinks-label {
-  font-size: 10px;
-  letter-spacing: 0.1em;
+  font-size: 7px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 6px;
@@ -489,8 +545,8 @@ canvas.creature-canvas {
 }
 
 .graph-panel-link {
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-size: 8px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #e8ff00;
   text-decoration: none;
@@ -503,4 +559,262 @@ canvas.creature-canvas {
   to {
     opacity: 1;
   }
+}
+
+/* Graph page — return link */
+.return-to-void {
+  position: fixed;
+  bottom: 28px;
+  left: 28px;
+  z-index: 20;
+  font-size: 7px;
+  font-family: "Press Start 2P", var(--font-plex-mono), "IBM Plex Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.25);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.return-to-void:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── Drop-to-feed ingestion UI ───────────────────────────────────────────── */
+
+.drop-zone-hint {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: rgba(232, 255, 0, 0.7);
+  z-index: 20;
+  animation: pulse-text 0.8s ease-in-out infinite;
+}
+
+.drop-zone-ingesting {
+  color: rgba(255, 100, 0, 0.9);
+}
+
+.drop-zone-done {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  z-index: 20;
+}
+
+.drop-zone-consumed {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.drop-zone-open {
+  color: #e8ff00;
+  text-decoration: none;
+  letter-spacing: 0.12em;
+}
+
+.drop-zone-open:hover {
+  text-decoration: underline;
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1.0; }
+}
+
+/* ── Listing pages (essays, notes) ─────────────────────────────────────── */
+
+.listing-page-center {
+  position: relative;
+  z-index: 10;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 100px 24px 120px 24px;
+}
+
+.listing-section-label {
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.listing-section-rule {
+  width: 40px;
+  height: 2px;
+  background-color: #e8ff00;
+  margin-top: 8px;
+  margin-bottom: 48px;
+}
+
+.listing-page-status {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.listing-items {
+  position: relative;
+  padding-left: 2px;
+}
+
+.listing-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.listing-item {
+  padding: 24px 0 24px 24px;
+  cursor: pointer;
+}
+
+.listing-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.listing-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 0;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.listing-dot-seedling {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.listing-dot-budding {
+  background: #00ffd1;
+}
+
+.listing-dot-evergreen {
+  background: #e8ff00;
+}
+
+.listing-title {
+  font-size: 13px;
+  color: #ffffff;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  transition: color 0.15s ease;
+}
+
+.listing-item:hover .listing-title {
+  color: #e8ff00;
+}
+
+.listing-meta {
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 6px;
+  margin-left: 18px;
+}
+
+.listing-excerpt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 8px;
+  margin-left: 18px;
+  line-height: 1.9;
+  max-height: 3.8em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.listing-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  margin-left: 18px;
+}
+
+.listing-tag {
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  color: #e8ff00;
+}
+
+/* ── Essay readability ──────────────────────────────────────────────────── */
+
+.essay-body {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  line-height: 1.9;
+  font-weight: 400;
+}
+
+.essay-body h1 {
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 3em 0 1em;
+  color: #ffffff;
+  line-height: 1.8;
+}
+
+.essay-body h2 {
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 3em 0 1.2em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.6em;
+}
+
+.essay-body h3 {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #e8ff00;
+  margin: 2.5em 0 0.8em;
+}
+
+.essay-body p {
+  margin: 0 0 1.5em 0;
+}
+
+.essay-body blockquote {
+  margin: 2em 0;
+  padding: 1.2em 1.5em;
+  border-left: 2px solid #e8ff00;
+  background: rgba(232, 255, 0, 0.03);
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.essay-body hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 3em 0;
+}
+
+.essay-body ul,
+.essay-body ol {
+  padding-left: 1.5em;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 2.2;
 }

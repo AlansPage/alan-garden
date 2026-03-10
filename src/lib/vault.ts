@@ -33,6 +33,7 @@ export interface GraphNode {
   status: NoteStatus;
   backlinkCount: number;
   excerpt: string;
+  tags: string[];
 }
 
 export interface GraphEdge {
@@ -48,6 +49,8 @@ export interface GraphData {
 export interface VaultStats {
   noteCount: number;
   essayCount: number;
+  totalNotes: number;
+  totalWords: number;
   lastUpdate: string;
 }
 
@@ -189,6 +192,7 @@ export function getGraphData(): GraphData {
     status: note.frontmatter.status,
     backlinkCount: backlinkCount.get(note.slug) ?? 0,
     excerpt: note.frontmatter.excerpt,
+    tags: note.frontmatter.tags,
   }));
 
   const edgeSet = new Set<string>();
@@ -222,9 +226,17 @@ export function getVaultStats(): VaultStats {
     if (d && (!lastUpdate || d > lastUpdate)) lastUpdate = d;
   }
 
+  const totalNotes = all.length;
+  const totalWords = all.reduce(
+    (sum, n) => sum + n.content.split(/\s+/).filter((w) => w.trim().length > 0).length,
+    0
+  );
+
   return {
     noteCount,
     essayCount,
+    totalNotes,
+    totalWords,
     lastUpdate: lastUpdate || new Date().toISOString().slice(0, 10),
   };
 }

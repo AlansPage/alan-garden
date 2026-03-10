@@ -1,29 +1,19 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import SceneRoot from "../components/SceneRoot";
-
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
+import { TransitionProvider } from "@/components/TransitionLayer";
 
 export const metadata: Metadata = {
   title: "ALAN_GARDEN",
-  description: "Alan's Garden — particle creature vault",
+  description: "Alan's Garden — pixel creature vault",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${plexMono.variable} garden-body`}>
-        <SceneRoot />
-        {children}
+      <body className="garden-body" style={{ fontFamily: "'Press Start 2P', 'IBM Plex Mono', monospace" }}>
+        <TransitionProvider>{children}</TransitionProvider>
       </body>
     </html>
   );

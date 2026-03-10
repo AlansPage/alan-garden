@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import Fuse from "fuse.js";
 import type { VaultStats } from "@/lib/vault";
+import { useZoomNavigate } from "@/components/TransitionLayer";
 
 type ContentType = "note" | "essay" | "project";
 
@@ -22,10 +24,17 @@ interface HomeShellProps {
 
 export default function HomeShell({ stats, items }: HomeShellProps) {
   const router = useRouter();
+  const zoomTo = useZoomNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dropState, setDropState] = useState<
+    "idle" | "hovering" | "ingesting" | "done"
+  >("idle");
+  const [ingestedTitle, setIngestedTitle] = useState<string | null>(null);
+  const [ingestedSlug, setIngestedSlug] = useState<string | null>(null);
+  const dragCounterRef = useRef(0);
 
   const fuse = useMemo(
     () =>
@@ -118,6 +127,91 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
     };
   }, [open, results, activeIndex, router]);
 
+  useEffect(() => {
+    const onDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current++;
+      const items = e.dataTransfer?.items;
+      const hasFile = Array.from(items ?? []).some((i) => i.kind === "file");
+      if (hasFile) setDropState("hovering");
+    };
+
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current--;
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setDropState("idle");
+      }
+    };
+
+    const onDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "copy";
+    };
+
+    const onDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      dragCounterRef.current = 0;
+
+      const file = e.dataTransfer?.files[0];
+      if (!file || !file.name.endsWith(".md")) {
+        setDropState("idle");
+        return;
+      }
+
+      setDropState("ingesting");
+      dispatchDim(true);
+
+      const content = await file.text();
+
+      window.dispatchEvent(new CustomEvent("creature-start-feeding"));
+
+      try {
+        const res = await fetch("/api/ingest-note", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, content }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok) {
+          setDropState("done");
+          setIngestedTitle(data.title);
+          setIngestedSlug(data.slug);
+
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
+            dispatchDim(false);
+          }, 4000);
+
+          setTimeout(() => {
+            setDropState("idle");
+            setIngestedTitle(null);
+            setIngestedSlug(null);
+          }, 8000);
+        }
+      } catch {
+        setDropState("idle");
+        window.dispatchEvent(new CustomEvent("creature-stop-feeding"));
+        dispatchDim(false);
+      }
+    };
+
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
   const onSearchBarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
     openOverlay();
@@ -159,20 +253,59 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
         </button>
 
         <nav className="home-nav">
-          <span className="home-nav-item">ESSAYS</span>
+          <Link href="/essays" className="home-nav-item">
+            ESSAYS
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">NOTES</span>
+          <Link href="/notes" className="home-nav-item">
+            NOTES
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">GRAPH</span>
+          <Link href="/graph" className="home-nav-item">
+            GRAPH
+          </Link>
           <span className="home-nav-sep">·</span>
-          <span className="home-nav-item">NOW</span>
+          <Link href="/now" className="home-nav-item">
+            NOW
+          </Link>
         </nav>
 
         <div className="home-status">
-          VAULT_STATUS: {stats.noteCount} NOTES · {stats.essayCount} ESSAYS ·
-          LAST_UPDATE: {stats.lastUpdate}
+          VAULT_MIND: {stats.totalNotes} ENTITIES CONSUMED ·{" "}
+          {stats.totalWords.toLocaleString()} WORDS ABSORBED
         </div>
+
+        {dropState === "hovering" && (
+          <div className="drop-zone-hint">RELEASE TO INGEST</div>
+        )}
+
+        {dropState === "ingesting" && (
+          <div className="drop-zone-hint drop-zone-ingesting">INGESTING...</div>
+        )}
+
+        {dropState === "done" && ingestedTitle && (
+          <div className="drop-zone-done">
+            <span className="drop-zone-consumed">
+              NOTE CONSUMED: {ingestedTitle}
+            </span>
+            <a href={`/notes/${ingestedSlug}`} className="drop-zone-open">
+              OPEN →
+            </a>
+          </div>
+        )}
       </main>
+
+      {dropState === "hovering" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            border: "1px solid rgba(232,255,0,0.1)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        />
+      )}
 
       {open && (
         <div
@@ -184,6 +317,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
           <div
             className="search-modal"
             onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <input
               ref={inputRef}
@@ -205,7 +339,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
                       : "search-result"
                   }
                   onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => {
+                  onClick={(e) => {
                     const base =
                       item.type === "essay"
                         ? "/essays"
@@ -213,7 +347,7 @@ export default function HomeShell({ stats, items }: HomeShellProps) {
                         ? "/projects"
                         : "/notes";
                     closeOverlay();
-                    router.push(`${base}/${item.slug}`);
+                    zoomTo(`${base}/${item.slug}`, e);
                   }}
                 >
                   <div className="search-result-header">

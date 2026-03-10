@@ -1,5 +1,6 @@
 import { getAllNotes, getVaultStats } from "@/lib/vault";
 import HomeShell from "@/components/HomeShell";
+import CreatureCanvas from "@/components/CreatureCanvas";
 
 export default function Home() {
   const stats = getVaultStats();
@@ -13,5 +14,10 @@ export default function Home() {
     excerpt: note.frontmatter.excerpt,
   }));
 
-  return <HomeShell stats={stats} items={items} />;
+  return (
+    <div>
+      <CreatureCanvas noteCount={stats.totalNotes} totalWords={stats.totalWords} />
+      <HomeShell stats={stats} items={items} />
+    </div>
+  );
 }

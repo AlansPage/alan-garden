@@ -1,587 +1,625 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import {
-  AdditiveBlending,
-  BufferAttribute,
-  BufferGeometry,
-  Color,
-  OrthographicCamera,
-  Points,
-  Scene,
-  ShaderMaterial,
-  Vector3,
-  WebGLRenderer,
-} from "three";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
-const TOTAL_PARTICLES = 20000;
-const BLOOD_PARTICLES = 800;
-const POD_PARTICLES = 2000;
-const ORGAN_PARTICLES = TOTAL_PARTICLES - BLOOD_PARTICLES - POD_PARTICLES; // 17,200
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-interface Organ {
-  center: Vector3;
-  baseRadius: number;
-  pulseSpeed: number;
-  pulseAmplitude: number;
-  phase: number;
-  growth: number;
-  growthPhase: "none" | "grow" | "decay";
-  growthStartMs: number;
-  growthFrom: number;
-  growthTo: number;
-  growthDurationMs: number;
+const PIXEL = 5; // Each "pixel" is 5x5 real pixels for chunky retro look
+const CREATURE_RADIUS = 72;   // fills ~70% of viewport height
+const CORE_RADIUS = 14;       // core stays tight — the moat needs to dominate
+const MOAT_WIDTH = 18;        // deep, wide darkness between core and shell
+const SPIKE_COUNT = 9;
+
+// ── Color palette (JRPG crystal orb) ──────────────────────────────────────────
+
+const COL_OUTER_DARK = "#0a1a55";
+const COL_OUTER_MID = "#1144cc";
+const COL_OUTER_BRIGHT = "#3377ff";
+const COL_OUTER_TIP = "#66aaff";
+const COL_SHELL_HIGHLIGHT = "#cce8ff";
+
+const COL_CORE_WHITE = "#ffffff";
+const COL_CORE_YELLOW = "#ffdd44";
+const COL_CORE_ORANGE = "#ff6600";
+const COL_CORE_RED = "#dd1100";
+const COL_CORE_DARK_RED = "#880000";
+
+const COL_STREAM_CYAN = "#00ccff";
+const COL_STREAM_AMBER = "#ffaa00";
+const COL_STREAM_RED = "#ff2800";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const v = parseInt(hex.replace("#", ""), 16);
+  return [(v >> 16) & 0xff, ((v >> 8) & 0xff), (v & 0xff)];
 }
 
-function makeParticleMaterial() {
-  return new ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: AdditiveBlending,
-    uniforms: {
-      uPixelRatio: { value: 1 },
-      uGlobalAlpha: { value: 1 },
+function lerpColor(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): string {
+  const r = Math.round(a[0] + (b[0] - a[0]) * t);
+  const g = Math.round(a[1] + (b[1] - a[1]) * t);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+
+// ── Synthesized SFX ───────────────────────────────────────────────────────────
+// No audio files. All sounds generated via Web Audio API oscillators.
+function createAudioEngine() {
+  let ctx: AudioContext | null = null;
+  const getCtx = () => {
+    if (!ctx) ctx = new AudioContext();
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  };
+  return {
+    // Low pulsing idle hum — creature is alive
+    playIdleHum() {
+      const c = getCtx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.connect(gain); gain.connect(c.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(55, c.currentTime);
+      osc.frequency.linearRampToValueAtTime(52, c.currentTime + 2);
+      gain.gain.setValueAtTime(0, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0.04, c.currentTime + 0.5);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 2.5);
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + 2.5);
     },
-    vertexShader: `
-      attribute vec3 color;
-      attribute float aSize;
-      attribute float aAlpha;
-      uniform float uPixelRatio;
-      uniform float uGlobalAlpha;
-      varying vec3 vColor;
-      varying float vAlpha;
-
-      void main() {
-        vColor = color;
-        vAlpha = aAlpha * uGlobalAlpha;
-
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = aSize * uPixelRatio;
+    // Rising drone on feeding start
+    playFeedStart() {
+      const c = getCtx();
+      [60, 90, 120].forEach((freq, i) => {
+        const osc = c.createOscillator();
+        const gain = c.createGain();
+        osc.connect(gain); gain.connect(c.destination);
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(freq * 0.8, c.currentTime + i * 0.05);
+        osc.frequency.linearRampToValueAtTime(freq, c.currentTime + 0.4 + i * 0.05);
+        gain.gain.setValueAtTime(0, c.currentTime + i * 0.05);
+        gain.gain.linearRampToValueAtTime(0.06, c.currentTime + 0.15 + i * 0.05);
+        gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.9 + i * 0.05);
+        osc.start(c.currentTime + i * 0.05);
+        osc.stop(c.currentTime + 1.0 + i * 0.05);
+      });
+    },
+    // Crunchy hit when a character is consumed
+    playCharConsumed() {
+      const c = getCtx();
+      const bufSize = c.sampleRate * 0.06;
+      const buf = c.createBuffer(1, bufSize, c.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufSize, 3);
       }
-    `,
-    fragmentShader: `
-      varying vec3 vColor;
-      varying float vAlpha;
-
-      void main() {
-        vec2 c = gl_PointCoord - vec2(0.5);
-        float d = length(c);
-        float mask = 1.0 - smoothstep(0.45, 0.5, d);
-        gl_FragColor = vec4(vColor, vAlpha * mask);
-      }
-    `,
-  });
+      const src = c.createBufferSource();
+      const gain = c.createGain();
+      const filter = c.createBiquadFilter();
+      src.buffer = buf;
+      filter.type = "bandpass";
+      filter.frequency.value = 800;
+      filter.Q.value = 0.8;
+      src.connect(filter); filter.connect(gain); gain.connect(c.destination);
+      gain.gain.setValueAtTime(0.18, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.06);
+      src.start(c.currentTime);
+    },
+    // Resolution tone when feeding stops
+    playFeedEnd() {
+      const c = getCtx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.connect(gain); gain.connect(c.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(220, c.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(110, c.currentTime + 0.6);
+      gain.gain.setValueAtTime(0.12, c.currentTime);
+      gain.gain.linearRampToValueAtTime(0, c.currentTime + 0.6);
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + 0.6);
+    },
+  };
 }
 
-export default function CreatureCanvas() {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+// Simple seeded pseudo-random for deterministic pixel patterns
+function seededRand(seed: number): number {
+  const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// ── Public interface ──────────────────────────────────────────────────────────
+
+export interface CreatureRef {
+  triggerFeed: (
+    x: number,
+    y: number,
+    noteData: { wordCount: number; tags: string[] }
+  ) => void;
+  triggerSeek: (query: string) => void;
+  setDimmed: (dimmed: boolean) => void;
+}
+
+// ── Stream particle type ──────────────────────────────────────────────────────
+
+interface StreamParticle {
+  alive: boolean;
+  t: number;
+  originX: number;
+  originY: number;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+interface CreatureProps {
+  noteCount?: number;
+  totalWords?: number;
+}
+
+const CreatureCanvas = forwardRef<CreatureRef, CreatureProps>(
+  function CreatureCanvas({ noteCount = 7, totalWords = 5000 }, ref) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animFrameRef = useRef<number>(0);
+
+  useImperativeHandle(ref, () => ({
+    triggerFeed(_x, _y, _noteData) {
+      window.dispatchEvent(new CustomEvent("creature-start-feeding"));
+    },
+    triggerSeek(_query) {},
+    setDimmed(dimmed) {
+      window.dispatchEvent(new CustomEvent("creature-dim", { detail: dimmed }));
+    },
+  }));
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const scene = new Scene();
-    const renderer = new WebGLRenderer({
-      antialias: true,
-      alpha: true,
-    });
-
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
-    renderer.setClearColor(0x000000, 1);
-
-    const container = containerRef.current;
-    container.appendChild(renderer.domElement);
-    renderer.domElement.classList.add("creature-canvas");
-
+    const ctx = canvas.getContext("2d")!;
     let width = window.innerWidth;
     let height = window.innerHeight;
-
-    const camera = new OrthographicCamera(0, width, height, 0, -1000, 1000);
-    camera.position.z = 1;
-
-    const organs: Organ[] = [];
-    const organCount = Math.floor(Math.random() * 4) + 4; // 4–7 organs
-
-    const edgeMargin = 220;
-
-    for (let i = 0; i < organCount; i++) {
-      const cx =
-        edgeMargin +
-        Math.random() * Math.max(1, width - edgeMargin * 2);
-      const cy =
-        edgeMargin +
-        Math.random() * Math.max(1, height - edgeMargin * 2);
-
-      organs.push({
-        center: new Vector3(cx, cy, 0),
-        baseRadius: 100 + Math.random() * 100, // 200–400px diameter
-        pulseSpeed: 0.2 + Math.random() * 0.2,
-        pulseAmplitude: 0.15 + Math.random() * 0.1,
-        phase: Math.random() * Math.PI * 2,
-        growth: 1,
-        growthPhase: "none",
-        growthStartMs: 0,
-        growthFrom: 1,
-        growthTo: 1,
-        growthDurationMs: 0,
-      });
-    }
-
-    // Organs
-    const organGeometry = new BufferGeometry();
-    const organPositions = new Float32Array(ORGAN_PARTICLES * 3);
-    const organColors = new Float32Array(ORGAN_PARTICLES * 3);
-    const organBaseColors = new Float32Array(ORGAN_PARTICLES * 3);
-    const organSizes = new Float32Array(ORGAN_PARTICLES);
-    const organAlpha = new Float32Array(ORGAN_PARTICLES);
-    const organIndex = new Uint8Array(ORGAN_PARTICLES);
-    const organOffsets = new Float32Array(ORGAN_PARTICLES * 3);
-    const organParticleLists: number[][] = Array.from(
-      { length: organCount },
-      () => []
-    );
-
-    // Bloodstream
-    const bloodGeometry = new BufferGeometry();
-    const bloodPositions = new Float32Array(BLOOD_PARTICLES * 3);
-    const bloodColors = new Float32Array(BLOOD_PARTICLES * 3);
-    const bloodSizes = new Float32Array(BLOOD_PARTICLES);
-    const bloodAlpha = new Float32Array(BLOOD_PARTICLES);
-    const streamData: {
-      from: number;
-      to: number;
-      t: number;
-      speed: number;
-    }[] = [];
-
-    // Pseudopod
-    const podGeometry = new BufferGeometry();
-    const podPositions = new Float32Array(POD_PARTICLES * 3);
-    const podColors = new Float32Array(POD_PARTICLES * 3);
-    const podSizes = new Float32Array(POD_PARTICLES);
-    const podAlpha = new Float32Array(POD_PARTICLES);
-    const podT = new Float32Array(POD_PARTICLES);
-    const podSpeed = new Float32Array(POD_PARTICLES);
-    const podReturning = new Uint8Array(POD_PARTICLES);
-    const podVelocity = new Float32Array(POD_PARTICLES * 3);
-
-    // Bloodstream initialization
-    for (let i = 0; i < BLOOD_PARTICLES; i++) {
-      const from = Math.floor(Math.random() * organCount);
-      let to = Math.floor(Math.random() * organCount);
-      if (to === from) to = (to + 1) % organCount;
-      streamData.push({
-        from,
-        to,
-        t: Math.random(),
-        speed: 0.003 + Math.random() * 0.005,
-      });
-
-      const idx3 = i * 3;
-      bloodPositions[idx3] = organs[from].center.x;
-      bloodPositions[idx3 + 1] = organs[from].center.y;
-      bloodPositions[idx3 + 2] = 0;
-      bloodColors[idx3] = 1;
-      bloodColors[idx3 + 1] = 1;
-      bloodColors[idx3 + 2] = 1;
-      bloodAlpha[i] = 0.3;
-      bloodSizes[i] = 1.0 + Math.random() * 0.8;
-    }
-
-    // Organ initialization
-    for (let i = 0; i < ORGAN_PARTICLES; i++) {
-      const oIndex = Math.floor(Math.random() * organCount);
-      organIndex[i] = oIndex;
-      organParticleLists[oIndex].push(i);
-      const organ = organs[oIndex];
-
-      const theta = Math.random() * Math.PI * 2;
-      const r = organ.baseRadius * (0.3 + Math.random() * 0.7);
-      const ex = Math.cos(theta) * r;
-      const ey = Math.sin(theta) * (r * (0.6 + Math.random() * 0.4));
-
-      const idx3 = i * 3;
-      organOffsets[idx3] = ex;
-      organOffsets[idx3 + 1] = ey;
-      organOffsets[idx3 + 2] = 0;
-
-      const edgeFactor = Math.min(
-        1,
-        Math.max(0, Math.sqrt((ex * ex + ey * ey) / (organ.baseRadius * organ.baseRadius)))
-      );
-
-      const mixed = new Color(0x00ffd1).lerp(new Color(0xffffff), edgeFactor);
-      organColors[idx3] = mixed.r;
-      organColors[idx3 + 1] = mixed.g;
-      organColors[idx3 + 2] = mixed.b;
-      organBaseColors[idx3] = mixed.r;
-      organBaseColors[idx3 + 1] = mixed.g;
-      organBaseColors[idx3 + 2] = mixed.b;
-
-      organPositions[idx3] = organ.center.x + ex;
-      organPositions[idx3 + 1] = organ.center.y + ey;
-      organPositions[idx3 + 2] = 0;
-
-      organAlpha[i] = 1.0;
-      organSizes[i] = 1.0 + Math.random() * 0.8;
-    }
-
-    // Pod initialization (hidden until feeding)
-    for (let i = 0; i < POD_PARTICLES; i++) {
-      const idx3 = i * 3;
-      podPositions[idx3] = -10000;
-      podPositions[idx3 + 1] = -10000;
-      podPositions[idx3 + 2] = 0;
-      podColors[idx3] = 1;
-      podColors[idx3 + 1] = 1;
-      podColors[idx3 + 2] = 1;
-      podAlpha[i] = 0;
-      podSizes[i] = 1.0 + Math.random() * 0.8;
-      podT[i] = Math.random();
-      podSpeed[i] = 0.003 + Math.random() * 0.005;
-      podReturning[i] = 0;
-      podVelocity[idx3] = 0;
-      podVelocity[idx3 + 1] = 0;
-      podVelocity[idx3 + 2] = 0;
-    }
-
-    organGeometry.setAttribute("position", new BufferAttribute(organPositions, 3));
-    organGeometry.setAttribute("color", new BufferAttribute(organColors, 3));
-    organGeometry.setAttribute("aSize", new BufferAttribute(organSizes, 1));
-    organGeometry.setAttribute("aAlpha", new BufferAttribute(organAlpha, 1));
-
-    bloodGeometry.setAttribute("position", new BufferAttribute(bloodPositions, 3));
-    bloodGeometry.setAttribute("color", new BufferAttribute(bloodColors, 3));
-    bloodGeometry.setAttribute("aSize", new BufferAttribute(bloodSizes, 1));
-    bloodGeometry.setAttribute("aAlpha", new BufferAttribute(bloodAlpha, 1));
-
-    podGeometry.setAttribute("position", new BufferAttribute(podPositions, 3));
-    podGeometry.setAttribute("color", new BufferAttribute(podColors, 3));
-    podGeometry.setAttribute("aSize", new BufferAttribute(podSizes, 1));
-    podGeometry.setAttribute("aAlpha", new BufferAttribute(podAlpha, 1));
-
-    const organMaterial = makeParticleMaterial();
-    const bloodMaterial = makeParticleMaterial();
-    const podMaterial = makeParticleMaterial();
-    const pixelRatio = window.devicePixelRatio || 1;
-    organMaterial.uniforms.uPixelRatio.value = pixelRatio;
-    bloodMaterial.uniforms.uPixelRatio.value = pixelRatio;
-    podMaterial.uniforms.uPixelRatio.value = pixelRatio;
-
-    const organPoints = new Points(organGeometry, organMaterial);
-    const bloodPoints = new Points(bloodGeometry, bloodMaterial);
-    const podPoints = new Points(podGeometry, podMaterial);
-    scene.add(organPoints);
-    scene.add(bloodPoints);
-    scene.add(podPoints);
-
-    const drift = new Vector3(
-      (Math.random() - 0.5) * 0.2,
-      (Math.random() - 0.5) * 0.2,
-      0
-    );
-
-    let feeding = false;
-    let feedingOrgan = 0;
-    let feedingTarget = new Vector3(width / 2, height / 2, 0);
-    let feedingStartMs = 0;
-    let lastFeedingOrgan: number | null = null;
-
-    let dimTarget = 1;
-    let dimCurrent = 1;
-
-    const onStartFeeding = (event: Event) => {
-      const now = performance.now();
-      const custom = event as CustomEvent<{ targetRect?: DOMRect | null }>;
-      const rect = custom.detail?.targetRect ?? null;
-      if (rect) {
-        feedingTarget.set(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2,
-          0
-        );
-      } else {
-        feedingTarget.set(width / 2, height / 2, 0);
-      }
-
-      let best = 0;
-      let bestDist = Infinity;
-      const center = new Vector3(width / 2, height / 2, 0);
-      for (let i = 0; i < organs.length; i++) {
-        const d = organs[i].center.distanceToSquared(center);
-        if (d < bestDist) {
-          bestDist = d;
-          best = i;
-        }
-      }
-
-      feedingOrgan = best;
-      lastFeedingOrgan = best;
-      feeding = true;
-      feedingStartMs = now;
-
-      for (let i = 0; i < POD_PARTICLES; i++) {
-        podAlpha[i] = 0.3;
-        podReturning[i] = 0;
-      }
-      (podGeometry.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
-    };
-
-    const onStopFeeding = () => {
-      feeding = false;
-
-      for (let i = 0; i < POD_PARTICLES; i++) {
-        podAlpha[i] = 0;
-        podReturning[i] = 0;
-      }
-      (podGeometry.getAttribute("aAlpha") as BufferAttribute).needsUpdate = true;
-
-      if (lastFeedingOrgan !== null) {
-        const organ = organs[lastFeedingOrgan];
-        organ.growthPhase = "grow";
-        organ.growthStartMs = performance.now();
-        organ.growthFrom = organ.growth;
-        organ.growthTo = 1.15;
-        organ.growthDurationMs = 4000;
-      }
-    };
-
-    const onCharConsumed = (event: Event) => {
-      if (!feeding) return;
-      const custom = event as CustomEvent<{ x: number; y: number }>;
-      const { x, y } = custom.detail;
-      const organ = organs[feedingOrgan];
-
-      const births = 8 + Math.floor(Math.random() * 5); // 8–12
-      for (let k = 0; k < births; k++) {
-        const i = Math.floor(Math.random() * POD_PARTICLES);
-        const idx3 = i * 3;
-
-        podReturning[i] = 1;
-        podPositions[idx3] = x;
-        podPositions[idx3 + 1] = y;
-        podPositions[idx3 + 2] = 0;
-
-        const dir = new Vector3(organ.center.x - x, organ.center.y - y, 0);
-        const len = Math.max(1, dir.length());
-        dir.multiplyScalar(1 / len);
-        const speed = 5 + Math.random() * 7;
-        podVelocity[idx3] = dir.x * speed;
-        podVelocity[idx3 + 1] = dir.y * speed;
-        podVelocity[idx3 + 2] = 0;
-      }
-    };
-
-    const handleDim = (event: Event) => {
-      const custom = event as CustomEvent<boolean>;
-      dimTarget = Boolean(custom.detail) ? 0.15 : 1;
-    };
 
     const resize = () => {
       width = window.innerWidth;
       height = window.innerHeight;
-      renderer.setSize(width, height);
-      camera.left = 0;
-      camera.right = width;
-      camera.top = height;
-      camera.bottom = 0;
-      camera.updateProjectionMatrix();
+      canvas.width = width;
+      canvas.height = height;
     };
-
     resize();
-    window.addEventListener("resize", resize);
-    window.addEventListener("creature-dim", handleDim as EventListener);
-    window.addEventListener("creature-start-feeding", onStartFeeding as EventListener);
-    window.addEventListener("creature-stop-feeding", onStopFeeding as EventListener);
-    window.addEventListener("creature-char-consumed", onCharConsumed as EventListener);
 
-    let frame = 0;
-    let animationFrameId = 0;
+    // ── Dynamic state ─────────────────────────────────────────────────────────
 
-    const redPulse = new Color(0xff3a1a);
+    let feedActive = false;
+    let coreBrightness = 1.0;
+    let coreBrightnessTarget = 1.0;
+    let globalAlpha = 1.0;
+    let globalAlphaTarget = 1.0;
 
-    const animate = () => {
-      frame += 1;
-      const now = performance.now();
+    const sfx = createAudioEngine();
+    // Idle heartbeat — every 8 seconds
+    const idleHumInterval = window.setInterval(() => {
+      if (!feedActive) sfx.playIdleHum();
+    }, 8000);
 
-      dimCurrent += (dimTarget - dimCurrent) * 0.06;
-      organMaterial.uniforms.uGlobalAlpha.value = dimCurrent;
-      bloodMaterial.uniforms.uGlobalAlpha.value = dimCurrent;
-      podMaterial.uniforms.uGlobalAlpha.value = dimCurrent;
+    const TENDRIL_COUNT = 6;
+    const TENDRIL_SEGMENTS = 28; // game-pixel segments per arm
 
-      // Drift + edge avoidance (slow)
-      for (const organ of organs) {
-        organ.center.x += drift.x;
-        organ.center.y += drift.y;
-        if (organ.center.x < edgeMargin || organ.center.x > width - edgeMargin) {
-          drift.x *= -1;
-        }
-        if (organ.center.y < edgeMargin || organ.center.y > height - edgeMargin) {
-          drift.y *= -1;
-        }
+    interface TendrilArm {
+      baseAngle: number;    // angle it emerges from creature
+      length: number;       // max length in game pixels
+      phase: number;        // personal time offset for writhe
+      thickness: number;    // pixel size at root (tapers to 1 at tip)
+    }
 
-        if (organ.growthPhase !== "none") {
-          const t = Math.min(
-            1,
-            (now - organ.growthStartMs) / Math.max(1, organ.growthDurationMs)
-          );
-          organ.growth = organ.growthFrom + (organ.growthTo - organ.growthFrom) * t;
-          if (t >= 1) {
-            if (organ.growthPhase === "grow") {
-              organ.growthPhase = "decay";
-              organ.growthStartMs = now;
-              organ.growthFrom = organ.growth;
-              organ.growthTo = 1;
-              organ.growthDurationMs = 20000;
-            } else {
-              organ.growthPhase = "none";
-            }
-          }
-        }
-      }
+    const tendrilArms: TendrilArm[] = Array.from(
+      { length: TENDRIL_COUNT },
+      (_, i) => ({
+        baseAngle: (i / TENDRIL_COUNT) * Math.PI * 2 + Math.random() * 0.4,
+        length: 28 + Math.floor(Math.random() * 20),
+        phase: Math.random() * Math.PI * 2,
+        thickness: 2 + (i % 3),   // 2, 3, 4 cycling
+      })
+    );
 
-      const time = frame / 60;
+    const STREAM_COUNT = 40;
+    const streamParticles: StreamParticle[] = Array.from(
+      { length: STREAM_COUNT },
+      () => ({ alive: false, t: 0, originX: 0, originY: 0 })
+    );
 
-      // Organ feeding color pulse
-      if (feeding) {
-        const pulseRed = Math.floor((now - feedingStartMs) / 500) % 2 === 1;
-        const list = organParticleLists[feedingOrgan] ?? [];
-        for (const i of list) {
-          const idx3 = i * 3;
-          if (pulseRed) {
-            organColors[idx3] = organBaseColors[idx3] * 0.35 + redPulse.r * 0.65;
-            organColors[idx3 + 1] = organBaseColors[idx3 + 1] * 0.35 + redPulse.g * 0.65;
-            organColors[idx3 + 2] = organBaseColors[idx3 + 2] * 0.35 + redPulse.b * 0.65;
+    // ── Pre-compute pixel data for creature shape ─────────────────────────────
+    // Creature grows with vault — min 52px, max 88px radius
+    // at 7 notes it's ~52, at 100 notes it's ~88
+    const scaledRadius = Math.round(
+      52 + Math.min(1, noteCount / 100) * 36
+    );
+    // Spike aggression grows with word density
+    // more words = more violent outer edge
+    const scaledNoiseAmp = 8 + Math.min(1, totalWords / 50000) * 8;
+
+    // We generate a lookup of which pixels belong to the creature and their
+    // color/alpha, then render them each frame with slight animation.
+
+    interface CreaturePixel {
+      gx: number; // grid x relative to center
+      gy: number; // grid y relative to center
+      layer: "outer" | "moat" | "core";
+      baseColor: string;
+      baseAlpha: number;
+      seed: number;
+    }
+
+    const creaturePixels: CreaturePixel[] = [];
+
+    const outerDarkRgb = hexToRgb(COL_OUTER_DARK);
+    const outerMidRgb = hexToRgb(COL_OUTER_MID);
+    const outerBrightRgb = hexToRgb(COL_OUTER_BRIGHT);
+    const outerTipRgb = hexToRgb(COL_OUTER_TIP);
+    const shellHighlightRgb = hexToRgb(COL_SHELL_HIGHLIGHT);
+
+    const coreWhiteRgb = hexToRgb(COL_CORE_WHITE);
+    const coreYellowRgb = hexToRgb(COL_CORE_YELLOW);
+    const coreOrangeRgb = hexToRgb(COL_CORE_ORANGE);
+    const coreRedRgb = hexToRgb(COL_CORE_RED);
+    const coreDarkRedRgb = hexToRgb(COL_CORE_DARK_RED);
+
+    for (let gy = -scaledRadius - 1; gy <= scaledRadius + 1; gy++) {
+      for (let gx = -scaledRadius - 1; gx <= scaledRadius + 1; gx++) {
+        const dist = Math.sqrt(gx * gx + gy * gy);
+        const seed = seededRand(gx * 1000 + gy);
+
+        // Noise-like displacement for organic edge
+        const angle = Math.atan2(gy, gx);
+        // Three frequency layers: large spikes + medium jagged + fine texture
+        const noiseDisp =
+          Math.sin(angle * SPIKE_COUNT + seed * 6.28) * scaledNoiseAmp +
+          Math.sin(angle * (SPIKE_COUNT * 2.7) + seed * 4.1) * (scaledNoiseAmp * 0.5) +
+          Math.sin(angle * (SPIKE_COUNT * 4.5) + seed * 9.3) * 2;
+        const effectiveRadius = scaledRadius + noiseDisp;
+
+        if (dist > effectiveRadius + 1) continue;
+
+        const t = dist / effectiveRadius; // 0=center, 1=edge
+
+        if (dist <= CORE_RADIUS) {
+          // Core region
+          const ct = dist / CORE_RADIUS;
+          let col: string;
+          if (ct < 0.2) {
+            col = lerpColor(coreWhiteRgb, coreYellowRgb, ct / 0.2);
+          } else if (ct < 0.45) {
+            col = lerpColor(coreYellowRgb, coreOrangeRgb, (ct - 0.2) / 0.25);
+          } else if (ct < 0.7) {
+            col = lerpColor(coreOrangeRgb, coreRedRgb, (ct - 0.45) / 0.25);
           } else {
-            organColors[idx3] = organBaseColors[idx3];
-            organColors[idx3 + 1] = organBaseColors[idx3 + 1];
-            organColors[idx3 + 2] = organBaseColors[idx3 + 2];
+            col = lerpColor(coreRedRgb, coreDarkRedRgb, (ct - 0.7) / 0.3);
           }
-        }
-        (organGeometry.getAttribute("color") as BufferAttribute).needsUpdate = true;
-      } else if (lastFeedingOrgan !== null) {
-        const list = organParticleLists[lastFeedingOrgan] ?? [];
-        for (const i of list) {
-          const idx3 = i * 3;
-          organColors[idx3] = organBaseColors[idx3];
-          organColors[idx3 + 1] = organBaseColors[idx3 + 1];
-          organColors[idx3 + 2] = organBaseColors[idx3 + 2];
-        }
-        (organGeometry.getAttribute("color") as BufferAttribute).needsUpdate = true;
-        lastFeedingOrgan = null;
-      }
-
-      // Update organ particle positions
-      for (let i = 0; i < ORGAN_PARTICLES; i++) {
-        const organ = organs[organIndex[i]];
-        const idx3 = i * 3;
-        const ex = organOffsets[idx3];
-        const ey = organOffsets[idx3 + 1];
-        const pulse =
-          1 + organ.pulseAmplitude * Math.sin(time * organ.pulseSpeed + organ.phase);
-        const s = pulse * organ.growth;
-        organPositions[idx3] = organ.center.x + ex * s;
-        organPositions[idx3 + 1] = organ.center.y + ey * s;
-        organPositions[idx3 + 2] = 0;
-      }
-
-      // Update bloodstream positions
-      for (let i = 0; i < BLOOD_PARTICLES; i++) {
-        const s = streamData[i];
-        const from = organs[s.from].center;
-        const to = organs[s.to].center;
-        s.t += s.speed;
-        if (s.t > 1) {
-          s.t = 0;
-          s.from = s.to;
-          let next = Math.floor(Math.random() * organCount);
-          if (next === s.from) next = (next + 1) % organCount;
-          s.to = next;
-        }
-        const t = s.t;
-        const idx3 = i * 3;
-        bloodPositions[idx3] = from.x + (to.x - from.x) * t;
-        bloodPositions[idx3 + 1] = from.y + (to.y - from.y) * t;
-        bloodPositions[idx3 + 2] = 0;
-      }
-
-      // Update pod
-      if (feeding) {
-        const organ = organs[feedingOrgan];
-        const reach = Math.min(1, (now - feedingStartMs) / 1200);
-        const dx = (feedingTarget.x - organ.center.x) * reach;
-        const dy = (feedingTarget.y - organ.center.y) * reach;
-
-        for (let i = 0; i < POD_PARTICLES; i++) {
-          const idx3 = i * 3;
-          if (podReturning[i] === 1) {
-            podPositions[idx3] += podVelocity[idx3];
-            podPositions[idx3 + 1] += podVelocity[idx3 + 1];
-
-            const dirX = organ.center.x - podPositions[idx3];
-            const dirY = organ.center.y - podPositions[idx3 + 1];
-            const len = Math.max(1, Math.hypot(dirX, dirY));
-            const ax = (dirX / len) * 0.8;
-            const ay = (dirY / len) * 0.8;
-
-            podVelocity[idx3] = podVelocity[idx3] * 0.92 + ax;
-            podVelocity[idx3 + 1] = podVelocity[idx3 + 1] * 0.92 + ay;
-
-            if (len < 24) {
-              podReturning[i] = 0;
-              podT[i] = Math.random();
-            }
+          creaturePixels.push({
+            gx, gy, layer: "core",
+            baseColor: col,
+            baseAlpha: 0.85 + seed * 0.15,
+            seed,
+          });
+        } else if (dist <= CORE_RADIUS + MOAT_WIDTH) {
+          // Moat (sparse dark zone between core and shell)
+          // Aggressive spike voids — wide dark claws radiating outward
+          const spikeHalf = 0.22 + ((dist - CORE_RADIUS) / MOAT_WIDTH) * 0.18;
+          const withinSpike = Math.abs(
+            ((angle + Math.PI) % (Math.PI * 2 / SPIKE_COUNT)) - Math.PI / SPIKE_COUNT
+          ) < spikeHalf;
+          if (withinSpike) continue;   // hard void — no particles in claw direction
+          if (seed > 0.04) continue;   // 4% survival — near-empty moat
+          creaturePixels.push({
+            gx, gy, layer: "moat",
+            baseColor: COL_OUTER_DARK,
+            baseAlpha: 0.15 + seed * 0.1,
+            seed,
+          });
+        } else {
+          // Outer shell
+          const shellT = (dist - CORE_RADIUS - MOAT_WIDTH) / (effectiveRadius - CORE_RADIUS - MOAT_WIDTH);
+          let col: string;
+          if (shellT > 0.85) {
+            col = lerpColor(outerTipRgb, shellHighlightRgb, (shellT - 0.85) / 0.15);
+          } else if (shellT > 0.6) {
+            col = lerpColor(outerBrightRgb, outerTipRgb, (shellT - 0.6) / 0.25);
+          } else if (shellT > 0.3) {
+            col = lerpColor(outerMidRgb, outerBrightRgb, (shellT - 0.3) / 0.3);
           } else {
-            podT[i] = (podT[i] + podSpeed[i]) % 1;
-            const t = podT[i] * reach;
-            podPositions[idx3] = organ.center.x + dx * t;
-            podPositions[idx3 + 1] = organ.center.y + dy * t;
-            podPositions[idx3 + 2] = 0;
+            col = lerpColor(outerDarkRgb, outerMidRgb, shellT / 0.3);
           }
-        }
-      } else {
-        for (let i = 0; i < POD_PARTICLES; i++) {
-          const idx3 = i * 3;
-          podPositions[idx3] = -10000;
-          podPositions[idx3 + 1] = -10000;
-          podPositions[idx3 + 2] = 0;
+
+          // Sparkle stars - some brighter pixels
+          const isStar = seed > 0.92;
+          const alpha = isStar
+            ? 0.6 + seed * 0.35
+            : 0.2 + shellT * 0.5 + seed * 0.15;
+
+          // Edge fade for anti-aliased-ish look (pixelated but not harsh cutoff)
+          const edgeFade = dist > effectiveRadius ? Math.max(0, 1 - (dist - effectiveRadius)) : 1;
+
+          creaturePixels.push({
+            gx, gy, layer: "outer",
+            baseColor: col,
+            baseAlpha: Math.min(1, alpha) * edgeFade,
+            seed,
+          });
         }
       }
+    }
 
-      (organGeometry.getAttribute("position") as BufferAttribute).needsUpdate = true;
-      (bloodGeometry.getAttribute("position") as BufferAttribute).needsUpdate = true;
-      (podGeometry.getAttribute("position") as BufferAttribute).needsUpdate = true;
+    // ── Event handlers ────────────────────────────────────────────────────────
 
-      renderer.render(scene, camera);
-      animationFrameId = window.requestAnimationFrame(animate);
+    const onStartFeeding = () => {
+      feedActive = true;
+      coreBrightnessTarget = 1.4;
+      sfx.playFeedStart();
     };
 
-    animate();
+    const onStopFeeding = () => {
+      feedActive = false;
+      coreBrightnessTarget = 1.0;
+      sfx.playFeedEnd();
+      for (const p of streamParticles) {
+        p.alive = false;
+      }
+    };
+
+    const handleDim = (e: Event) => {
+      const dim = (e as CustomEvent<boolean>).detail;
+      globalAlphaTarget = dim ? 0.12 : 1.0;
+    };
+
+    const onCharConsumed = () => {
+      // Only play every 4th character — not every single one
+      if (Math.random() < 0.25) sfx.playCharConsumed();
+    };
+
+    window.addEventListener("creature-start-feeding", onStartFeeding);
+    window.addEventListener("creature-stop-feeding", onStopFeeding);
+    window.addEventListener("creature-dim", handleDim);
+    window.addEventListener("creature-char-consumed", onCharConsumed);
+
+    // ── Animation loop ────────────────────────────────────────────────────────
+
+    let time = 0;
+
+    function animate() {
+      time += 0.016;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, width, height);
+
+      // Slow breathing
+      const breathe = 1.0 + Math.sin(time * 0.32) * 0.04;
+
+      // Core brightness
+      const bLerp = coreBrightness < coreBrightnessTarget ? 0.05 : 0.015;
+      coreBrightness += (coreBrightnessTarget - coreBrightness) * bLerp;
+
+      // Global alpha
+      const aLerp = globalAlphaTarget < globalAlpha ? 0.05 : 0.04;
+      globalAlpha += (globalAlphaTarget - globalAlpha) * aLerp;
+
+      // Center of creature
+      const cx = Math.floor(width / 2);
+      const cy = Math.floor(height / 2);
+
+      // Slow rotation effect via shifting pixel selection
+      const rotAngle = time * 0.08;
+
+      // ── Dark corruption aura ─────────────────────────────────────────────
+      // Pulsing black-purple shadow — drawn under everything
+      const auraSize = scaledRadius * PIXEL * (2.2 + Math.sin(time * 0.6) * 0.15);
+      const auraGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, auraSize);
+      auraGrad.addColorStop(0,    "rgba(0,0,0,0)");
+      auraGrad.addColorStop(0.35, "rgba(0,0,0,0)");
+      auraGrad.addColorStop(0.55, "rgba(20,0,40,0.35)");   // deep violet
+      auraGrad.addColorStop(0.72, "rgba(40,0,20,0.55)");   // dark crimson
+      auraGrad.addColorStop(0.85, "rgba(10,0,10,0.7)");
+      auraGrad.addColorStop(1,    "rgba(0,0,0,0)");
+      ctx.globalAlpha = globalAlpha;
+      ctx.fillStyle = auraGrad;
+      ctx.fillRect(cx - auraSize, cy - auraSize, auraSize * 2, auraSize * 2);
+
+      ctx.globalAlpha = globalAlpha;
+
+      // ── Draw creature pixels ──────────────────────────────────────────────
+
+      for (const px of creaturePixels) {
+        // Spike layer gets independent radial writhe
+        // Each outer pixel pulses based on its angle + seed — organic claw motion
+        let scale = breathe;
+        if (px.layer === "outer") {
+          const pxAngle = Math.atan2(px.gy, px.gx);
+          const writhe = 1.0 + Math.sin(time * 1.8 + pxAngle * SPIKE_COUNT * 0.5 + px.seed * 12) * 0.04;
+          scale = breathe * writhe;
+        }
+        const sx = px.gx * scale;
+        const sy = px.gy * scale;
+
+        // Apply subtle rotation
+        const cos = Math.cos(rotAngle);
+        const sin = Math.sin(rotAngle);
+        const rx = sx * cos - sy * sin;
+        const ry = sx * sin + sy * cos;
+
+        // Snap to pixel grid for that crunchy retro look
+        const drawX = cx + Math.round(rx) * PIXEL;
+        const drawY = cy + Math.round(ry) * PIXEL;
+
+        // Twinkle effect for stars
+        let alpha = px.baseAlpha;
+        if (px.layer === "outer" && px.seed > 0.88) {
+          alpha *= 0.6 + 0.4 * Math.sin(time * 2.5 + px.seed * 50);
+        }
+
+        // Core brightness boost
+        if (px.layer === "core") {
+          alpha = Math.min(1, alpha * coreBrightness);
+        }
+
+        ctx.globalAlpha = globalAlpha * alpha;
+        ctx.fillStyle = px.baseColor;
+        ctx.fillRect(drawX, drawY, PIXEL, PIXEL);
+      }
+
+      // ── Core glow (simple radial) ──────────────────────────────────────────
+
+      ctx.globalAlpha = globalAlpha * 0.3 * coreBrightness;
+      const glowSize = CORE_RADIUS * PIXEL * 2.5 * breathe;
+      const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowSize);
+      gradient.addColorStop(0, "rgba(255,240,120,0.8)");
+      gradient.addColorStop(0.3, "rgba(255,120,10,0.4)");
+      gradient.addColorStop(0.6, "rgba(200,20,0,0.15)");
+      gradient.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(cx - glowSize, cy - glowSize, glowSize * 2, glowSize * 2);
+
+      // ── Outer glow haze ────────────────────────────────────────────────────
+
+      ctx.globalAlpha = globalAlpha * 0.12;
+      const outerGlow = scaledRadius * PIXEL * 1.8 * breathe;
+      const outerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerGlow);
+      outerGrad.addColorStop(0, "rgba(51,119,255,0.3)");
+      outerGrad.addColorStop(0.5, "rgba(10,26,85,0.15)");
+      outerGrad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = outerGrad;
+      ctx.fillRect(cx - outerGlow, cy - outerGlow, outerGlow * 2, outerGlow * 2);
+
+      // ── Tendril arms ──────────────────────────────────────────────────────
+      // Segmented arms that emerge from the sphere edge and writhe slowly.
+      // Each segment steps outward from the creature surface,
+      // with cumulative noise-based angular drift per segment.
+
+      for (const arm of tendrilArms) {
+        // Current arm root angle drifts very slowly
+        const rootAngle = arm.baseAngle + Math.sin(time * 0.22 + arm.phase) * 0.3;
+        let segX = cx + Math.cos(rootAngle) * scaledRadius * PIXEL;
+        let segY = cy + Math.sin(rootAngle) * scaledRadius * PIXEL;
+        let currentAngle = rootAngle;
+
+        const segLen = PIXEL * 2; // each segment = 2 game pixels of length
+
+        for (let s = 0; s < TENDRIL_SEGMENTS; s++) {
+          const progress = s / TENDRIL_SEGMENTS;
+          if (progress > arm.length / (TENDRIL_SEGMENTS * 2)) break;
+
+          // Writhe: angle drifts sinusoidally per segment
+          const writheFreq = 2.8 + arm.phase * 0.3;
+          currentAngle += Math.sin(time * writheFreq + s * 0.35 + arm.phase) * 0.12;
+
+          const nextX = segX + Math.cos(currentAngle) * segLen;
+          const nextY = segY + Math.sin(currentAngle) * segLen;
+
+          // Taper: thick at root, 1px at tip
+          const taper = Math.max(1, Math.round(arm.thickness * (1 - progress * 0.85)));
+          const segPx = Math.max(1, taper) * PIXEL;
+
+          // Color: deep blue at root → dark navy → near-invisible at tips
+          const colT = progress;
+          const rr = Math.round(17 + colT * (-17));        // 17 → 0
+          const rg = Math.round(68 + colT * (0 - 68));     // 68 → 0
+          const rb = Math.round(204 + colT * (10 - 204));  // 204 → 10
+          const segAlpha = globalAlpha * (0.65 - progress * 0.55);
+
+          // Snap to pixel grid
+          const drawX = Math.round(segX / PIXEL) * PIXEL;
+          const drawY = Math.round(segY / PIXEL) * PIXEL;
+
+          ctx.globalAlpha = segAlpha;
+          ctx.fillStyle = `rgb(${rr},${rg},${rb})`;
+          ctx.fillRect(drawX - segPx / 2, drawY - segPx / 2, segPx, segPx);
+
+          segX = nextX;
+          segY = nextY;
+        }
+      }
+
+      // ── Feed stream particles ──────────────────────────────────────────────
+
+      if (feedActive) {
+        let emitted = 0;
+        for (const p of streamParticles) {
+          if (!p.alive && emitted < 2) {
+            p.alive = true;
+            p.t = 0;
+            p.originX = cx + (Math.random() - 0.5) * 120;
+            p.originY = cy - height * 0.35;
+            emitted++;
+          }
+        }
+      }
+
+      const streamCyanRgb = hexToRgb(COL_STREAM_CYAN);
+      const streamAmberRgb = hexToRgb(COL_STREAM_AMBER);
+      const streamRedRgb = hexToRgb(COL_STREAM_RED);
+
+      for (const p of streamParticles) {
+        if (!p.alive) continue;
+        p.t += 0.008 + Math.random() * 0.003;
+        if (p.t >= 1.0) {
+          p.alive = false;
+          continue;
+        }
+
+        const px = p.originX * (1 - p.t) + cx * p.t + Math.sin(p.t * Math.PI * 3) * 8;
+        const py = p.originY * (1 - p.t) + cy * p.t;
+
+        let col: string;
+        if (p.t < 0.3) col = lerpColor(streamCyanRgb, streamAmberRgb, p.t / 0.3);
+        else if (p.t < 0.7) col = lerpColor(streamAmberRgb, streamRedRgb, (p.t - 0.3) / 0.4);
+        else col = `rgb(${streamRedRgb[0]},${streamRedRgb[1]},${streamRedRgb[2]})`;
+
+        const fadeIn = Math.min(1, p.t / 0.1);
+        const fadeOut = Math.max(0, 1 - Math.max(0, (p.t - 0.8) / 0.2));
+
+        ctx.globalAlpha = globalAlpha * 0.7 * fadeIn * fadeOut;
+        ctx.fillStyle = col;
+        // Stream particles are also pixelated
+        const spx = Math.round(px / PIXEL) * PIXEL;
+        const spy = Math.round(py / PIXEL) * PIXEL;
+        ctx.fillRect(spx, spy, PIXEL * 2, PIXEL * 2);
+      }
+
+      ctx.globalAlpha = 1;
+      animFrameRef.current = window.requestAnimationFrame(animate);
+    }
+
+    animFrameRef.current = window.requestAnimationFrame(animate);
+
+    window.addEventListener("resize", resize);
 
     return () => {
-      window.cancelAnimationFrame(animationFrameId);
+      window.cancelAnimationFrame(animFrameRef.current);
+      window.clearInterval(idleHumInterval);
       window.removeEventListener("resize", resize);
-      window.removeEventListener("creature-dim", handleDim as EventListener);
-      window.removeEventListener("creature-start-feeding", onStartFeeding as EventListener);
-      window.removeEventListener("creature-stop-feeding", onStopFeeding as EventListener);
-      window.removeEventListener("creature-char-consumed", onCharConsumed as EventListener);
-
-      scene.remove(organPoints);
-      scene.remove(bloodPoints);
-      scene.remove(podPoints);
-      organGeometry.dispose();
-      bloodGeometry.dispose();
-      podGeometry.dispose();
-      organMaterial.dispose();
-      bloodMaterial.dispose();
-      podMaterial.dispose();
-      renderer.dispose();
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement);
-      }
+      window.removeEventListener("creature-start-feeding", onStartFeeding);
+      window.removeEventListener("creature-stop-feeding", onStopFeeding);
+      window.removeEventListener("creature-dim", handleDim);
+      window.removeEventListener("creature-char-consumed", onCharConsumed);
     };
-  }, []);
+  }, [noteCount, totalWords]);
 
-  return <div ref={containerRef} />;
-}
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
+        zIndex: 0,
+        pointerEvents: "none",
+        imageRendering: "pixelated",
+      }}
+    />
+  );
+});
 
+export default CreatureCanvas;

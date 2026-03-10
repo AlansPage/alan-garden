@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { GraphData, NoteStatus } from "@/lib/vault";
 import GraphCanvas from "./GraphCanvas";
-import Link from "next/link";
 
 interface NoteMeta {
   slug: string;
@@ -20,8 +20,10 @@ interface GraphPageClientProps {
 
 export default function GraphPageClient({ graph, notes }: GraphPageClientProps) {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [isLinkHovered, setIsLinkHovered] = useState(false);
+
   const selected = selectedSlug
-    ? notes.find((note) => note.slug === selectedSlug) ?? null
+    ? (notes.find((note) => note.slug === selectedSlug) ?? null)
     : null;
 
   return (
@@ -30,7 +32,9 @@ export default function GraphPageClient({ graph, notes }: GraphPageClientProps) 
         graph={graph}
         selectedSlug={selectedSlug}
         onSelectNode={setSelectedSlug}
+        isLinkHovered={isLinkHovered}
       />
+
       {selected && (
         <aside className="graph-panel">
           <div className="graph-panel-inner">
@@ -57,7 +61,16 @@ export default function GraphPageClient({ graph, notes }: GraphPageClientProps) 
           </div>
         </aside>
       )}
+
+      {/* Fixed bottom-left return link — brightens organ 2 on hover */}
+      <Link
+        href="/"
+        className="return-to-void"
+        onMouseEnter={() => setIsLinkHovered(true)}
+        onMouseLeave={() => setIsLinkHovered(false)}
+      >
+        ↖ RETURN TO VOID
+      </Link>
     </>
   );
 }
-
