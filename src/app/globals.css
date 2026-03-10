@@ -315,7 +315,7 @@ canvas.creature-canvas {
 }
 
 .note-title {
-  font-size: 16px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin: 0;
@@ -357,8 +357,10 @@ canvas.creature-canvas {
 }
 
 .note-body {
-  font-size: 9px;
-  line-height: 2.0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  line-height: 1.85;
+  font-weight: 400;
 }
 
 .note-body p {
@@ -434,9 +436,10 @@ canvas.creature-canvas {
 }
 
 .note-backlink-excerpt {
-  font-size: 8px;
-  line-height: 1.8;
-  color: rgba(255, 255, 255, 0.7);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.75;
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .char {
@@ -741,12 +744,14 @@ canvas.creature-canvas {
 /* ── Essay readability ──────────────────────────────────────────────────── */
 
 .essay-body {
-  font-size: 9px;
-  line-height: 2.2;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  line-height: 1.9;
+  font-weight: 400;
 }
 
 .essay-body h1 {
-  font-size: 14px;
+  font-size: 20px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   margin: 3em 0 1em;
@@ -755,7 +760,7 @@ canvas.creature-canvas {
 }
 
 .essay-body h2 {
-  font-size: 10px;
+  font-size: 14px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
@@ -765,7 +770,7 @@ canvas.creature-canvas {
 }
 
 .essay-body h3 {
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #e8ff00;
