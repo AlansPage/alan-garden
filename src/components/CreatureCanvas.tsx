@@ -116,6 +116,26 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
     let globalAlpha = 1.0;
     let globalAlphaTarget = 1.0;
 
+    const TENDRIL_COUNT = 6;
+    const TENDRIL_SEGMENTS = 28; // game-pixel segments per arm
+
+    interface TendrilArm {
+      baseAngle: number;    // angle it emerges from creature
+      length: number;       // max length in game pixels
+      phase: number;        // personal time offset for writhe
+      thickness: number;    // pixel size at root (tapers to 1 at tip)
+    }
+
+    const tendrilArms: TendrilArm[] = Array.from(
+      { length: TENDRIL_COUNT },
+      (_, i) => ({
+        baseAngle: (i / TENDRIL_COUNT) * Math.PI * 2 + Math.random() * 0.4,
+        length: 28 + Math.floor(Math.random() * 20),
+        phase: Math.random() * Math.PI * 2,
+        thickness: 2 + (i % 3),   // 2, 3, 4 cycling
+      })
+    );
+
     const STREAM_COUNT = 40;
     const streamParticles: StreamParticle[] = Array.from(
       { length: STREAM_COUNT },
@@ -365,6 +385,55 @@ const CreatureCanvas = forwardRef<CreatureRef>(function CreatureCanvas(
       outerGrad.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = outerGrad;
       ctx.fillRect(cx - outerGlow, cy - outerGlow, outerGlow * 2, outerGlow * 2);
+
+      // ── Tendril arms ──────────────────────────────────────────────────────
+      // Segmented arms that emerge from the sphere edge and writhe slowly.
+      // Each segment steps outward from the creature surface,
+      // with cumulative noise-based angular drift per segment.
+
+      for (const arm of tendrilArms) {
+        // Current arm root angle drifts very slowly
+        const rootAngle = arm.baseAngle + Math.sin(time * 0.22 + arm.phase) * 0.3;
+        let segX = cx + Math.cos(rootAngle) * CREATURE_RADIUS * PIXEL;
+        let segY = cy + Math.sin(rootAngle) * CREATURE_RADIUS * PIXEL;
+        let currentAngle = rootAngle;
+
+        const segLen = PIXEL * 2; // each segment = 2 game pixels of length
+
+        for (let s = 0; s < TENDRIL_SEGMENTS; s++) {
+          const progress = s / TENDRIL_SEGMENTS;
+          if (progress > arm.length / (TENDRIL_SEGMENTS * 2)) break;
+
+          // Writhe: angle drifts sinusoidally per segment
+          const writheFreq = 2.8 + arm.phase * 0.3;
+          currentAngle += Math.sin(time * writheFreq + s * 0.35 + arm.phase) * 0.12;
+
+          const nextX = segX + Math.cos(currentAngle) * segLen;
+          const nextY = segY + Math.sin(currentAngle) * segLen;
+
+          // Taper: thick at root, 1px at tip
+          const taper = Math.max(1, Math.round(arm.thickness * (1 - progress * 0.85)));
+          const segPx = Math.max(1, taper) * PIXEL;
+
+          // Color: deep blue at root → dark navy → near-invisible at tips
+          const colT = progress;
+          const rr = Math.round(17 + colT * (-17));        // 17 → 0
+          const rg = Math.round(68 + colT * (0 - 68));     // 68 → 0
+          const rb = Math.round(204 + colT * (10 - 204));  // 204 → 10
+          const segAlpha = globalAlpha * (0.65 - progress * 0.55);
+
+          // Snap to pixel grid
+          const drawX = Math.round(segX / PIXEL) * PIXEL;
+          const drawY = Math.round(segY / PIXEL) * PIXEL;
+
+          ctx.globalAlpha = segAlpha;
+          ctx.fillStyle = `rgb(${rr},${rg},${rb})`;
+          ctx.fillRect(drawX - segPx / 2, drawY - segPx / 2, segPx, segPx);
+
+          segX = nextX;
+          segY = nextY;
+        }
+      }
 
       // ── Feed stream particles ──────────────────────────────────────────────
 
