@@ -236,7 +236,8 @@ canvas.creature-canvas {
 
 .search-result-excerpt {
   margin-top: 4px;
-  font-size: 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
   line-height: 1.8;
   color: rgba(255, 255, 255, 0.5);
 }
@@ -443,7 +444,7 @@ canvas.creature-canvas {
 }
 
 .note-backlink-title {
-  font-size: 9px;
+  font-size: 12px;
   margin-bottom: 4px;
 }
 
@@ -509,7 +510,8 @@ canvas.creature-canvas {
 }
 
 .graph-panel-excerpt {
-  font-size: 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
   line-height: 1.8;
   color: rgba(255, 255, 255, 0.8);
 }
@@ -708,7 +710,7 @@ canvas.creature-canvas {
 }
 
 .listing-title {
-  font-size: 11px;
+  font-size: 13px;
   color: #ffffff;
   letter-spacing: 0.04em;
   line-height: 1.6;
@@ -727,7 +729,8 @@ canvas.creature-canvas {
 }
 
 .listing-excerpt {
-  font-size: 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
   margin-top: 8px;
   margin-left: 18px;
@@ -811,7 +814,7 @@ canvas.creature-canvas {
 .essay-body ul,
 .essay-body ol {
   padding-left: 1.5em;
-  font-size: 8px;
+  font-size: 13px;
   color: rgba(255, 255, 255, 0.6);
   line-height: 2.2;
 }
